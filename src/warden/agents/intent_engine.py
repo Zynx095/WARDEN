@@ -154,22 +154,23 @@ class IntentEngine:
 
         # Create/write requests
         elif "create" in lower or "make" in lower or "write" in lower:
-            matches = re.findall(r"[\w\.-]+\.\w+", text)
+            matches = re.findall(r"(?:\.[\w-]+|[\w\.-]+\.[\w-]+)", text)
             target = matches[0] if matches else "output.txt"
             content_match = re.search(r"with (?:content|text) ['\"](.*?)['\"]", text)
             content = content_match.group(1) if content_match else "Default generated content."
+            op = "WRITE" if "write" in lower else "CREATE"
             actions.append(
                 Action(
-                    operation="CREATE",
+                    operation=op,
                     target=target,
                     content=content,
-                    reason="Rule-based file creation proposal.",
+                    reason=f"Rule-based file {op.lower()} proposal.",
                 )
             )
 
         # Read requests
         elif "read" in lower or "view" in lower or "inspect" in lower or "show" in lower:
-            matches = re.findall(r"[\w\.-]+\.\w+", text)
+            matches = re.findall(r"(?:\.[\w-]+|[\w\.-]+\.[\w-]+)", text)
             target = matches[0] if matches else "README.md"
             actions.append(
                 Action(
