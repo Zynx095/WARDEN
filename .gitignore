@@ -5,6 +5,7 @@
 secrets.json
 credentials.json
 production.env
+private_keys.json
 
 # Virtual environments
 .venv/
