@@ -137,3 +137,52 @@ def test_seed_not_leaked_in_logs_or_attributes(tmp_path: Path, caplog: pytest.Lo
     # The agent public representation must not contain the seed
     assert secret_seed not in str(agent.address)
     assert secret_seed not in str(agent.name)
+
+
+def test_placeholder_seed_from_env_template_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("AGENT_SEED", "your_secure_agent_seed_phrase_here")
+    with pytest.raises(AgentIdentityError):
+        build_warden_agent(workspace_dir=tmp_path / "ws")
+
+
+def test_default_mode_is_local_only():
+    from warden.agents.run_agent import describe_mode
+    assert describe_mode(False, None) == "local-only"
+    assert "not verified" in describe_mode(True, None)
+    assert "not verified" in describe_mode(False, "https://example.invalid/submit")
+
+
+def test_restrict_bind_host_sets_sdk_constant():
+    from uagents import asgi
+    from warden.agents.run_agent import restrict_bind_host
+    original = asgi.HOST
+    try:
+        assert restrict_bind_host("127.0.0.1") is True
+        assert asgi.HOST == "127.0.0.1"
+    finally:
+        asgi.HOST = original
+
+
+def test_main_show_address_uses_repo_env_file_not_cwd(tmp_path, monkeypatch, capsys):
+    from warden.agents.run_agent import main
+    from warden.identity import generate_seed
+    seed = generate_seed()
+    env = tmp_path / "custom.env"
+    env.write_text(f"AGENT_SEED={seed}\n", encoding="utf-8")
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    monkeypatch.delenv("AGENT_SEED", raising=False)
+    monkeypatch.setenv("WARDEN_ENV_FILE", str(env))
+    assert main(["--show-address"]) == 0
+    out = capsys.readouterr().out
+    assert derive_agent_address(seed) in out and seed not in out
+    monkeypatch.delenv("AGENT_SEED", raising=False)
+
+
+def test_main_missing_seed_exits_nonzero_without_traceback(tmp_path, monkeypatch, capsys):
+    from warden.agents.run_agent import main
+    monkeypatch.setenv("WARDEN_ENV_FILE", str(tmp_path / "absent.env"))
+    monkeypatch.delenv("AGENT_SEED", raising=False)
+    assert main(["--show-address"]) == 1
+    assert "CONFIGURATION ERROR" in capsys.readouterr().err
