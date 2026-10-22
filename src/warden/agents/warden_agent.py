@@ -40,6 +40,7 @@ class WardenAgent:
         self,
         workspace: Optional[Workspace] = None,
         config: Optional[WardenConfig] = None,
+        audit_log_file: Optional[Path] = None,
     ) -> None:
         self.config = config or get_config()
         self.workspace = workspace or Workspace(self.config.workspace_root)
@@ -52,7 +53,7 @@ class WardenAgent:
             path_validator=self.path_validator,
         )
         self.auditor = OutcomeAuditor(self.workspace, path_validator=self.path_validator)
-        self.audit_logger = AuditLogger()
+        self.audit_logger = AuditLogger(audit_log_file)
 
     def handle_action_request(
         self,

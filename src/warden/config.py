@@ -103,6 +103,14 @@ def _workspace_root() -> Path:
     return resolve_repo_path(os.getenv("WARDEN_WORKSPACE_ROOT") or "./temp_workspace")
 
 
+def _audit_log() -> Optional[Path]:
+    """Persistent JSONL audit log location; an explicitly empty value disables persistence."""
+    raw = os.getenv("WARDEN_AUDIT_LOG")
+    if raw is not None and raw.strip() == "":
+        return None
+    return resolve_repo_path(raw or "./logs/audit.jsonl")
+
+
 class WardenConfig(BaseModel):
     """Runtime configuration for WARDEN."""
     env: str = Field(default_factory=lambda: os.getenv("WARDEN_ENV", "development"))
@@ -114,6 +122,7 @@ class WardenConfig(BaseModel):
     require_approval_for_destructive: bool = Field(
         default_factory=lambda: env_bool("WARDEN_REQUIRE_APPROVAL_FOR_DESTRUCTIVE", True)
     )
+    audit_log: Optional[Path] = Field(default_factory=_audit_log)
     secret_key: str = Field(default_factory=_secret_key, repr=False)
 
 
