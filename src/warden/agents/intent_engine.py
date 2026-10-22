@@ -128,27 +128,28 @@ class IntentEngine:
 
         # Cleanup requests
         if "clean" in lower or "remove" in lower or "delete" in lower or "purge" in lower:
-            # Check for candidate files in context or keywords
             files_to_clean: List[str] = []
+            # Extract any explicitly named files in user text
+            explicit_files = re.findall(r"(?:\.[\w-]+|[\w\.-]+\.[\w-]+)", text)
+            for ef in explicit_files:
+                if ef not in files_to_clean:
+                    files_to_clean.append(ef)
+
+            # Also identify temporary or cache files in workspace context
             if context and "available_files" in context:
                 for f in context["available_files"]:
-                    # Identify temporary or cache files
                     if f.endswith((".tmp", ".log", ".bak", ".cache")) or "temp" in f or "cache" in f:
-                        files_to_clean.append(f)
-            else:
-                # Extract explicit filenames from text
-                matches = re.findall(r"[\w\.-]+\.(?:tmp|log|bak|txt|json|env|bin)", text)
-                if matches:
-                    files_to_clean.extend(matches)
-                else:
-                    files_to_clean.extend(["cache.tmp", "temp.log"])
+                        if f not in files_to_clean:
+                            files_to_clean.append(f)
+            elif not files_to_clean:
+                files_to_clean.extend(["cache.tmp", "temp.log"])
 
             for f in files_to_clean:
                 actions.append(
                     Action(
                         operation="DELETE",
                         target=f,
-                        reason="Rule-based cleanup proposal for temporary file.",
+                        reason="Rule-based cleanup proposal.",
                     )
                 )
 
