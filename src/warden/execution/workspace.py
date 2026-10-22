@@ -13,6 +13,21 @@ class WorkspaceError(Exception):
     pass
 
 
+def _unsafe_to_wipe_reason(root: Path) -> Optional[str]:
+    """Explain why ``root`` must never be bulk-deleted, or None if it is acceptable."""
+    from warden.config import REPO_ROOT
+
+    if root == Path(root.anchor):
+        return "it is a filesystem root"
+    if root == Path.home().resolve():
+        return "it is the user's home directory"
+    if root == REPO_ROOT or root in REPO_ROOT.parents:
+        return "it is the WARDEN repository or one of its parent directories"
+    if (root / ".git").exists():
+        return "it contains Git metadata"
+    return None
+
+
 class Workspace:
     """Manages an isolated directory sandbox for safe file operations."""
 
@@ -27,6 +42,7 @@ class Workspace:
 
     def clean(self) -> None:
         """Safely remove all contents within the workspace root."""
+        self._assert_disposable()
         if not self.root_path.exists():
             return
         for item in self.root_path.iterdir():
@@ -40,8 +56,14 @@ class Workspace:
 
     def teardown(self) -> None:
         """Completely delete the workspace root directory."""
+        self._assert_disposable()
         if self.root_path.exists():
             shutil.rmtree(self.root_path, ignore_errors=True)
+
+    def _assert_disposable(self) -> None:
+        reason = _unsafe_to_wipe_reason(self.root_path)
+        if reason:
+            raise WorkspaceError(f"Refusing to delete workspace contents: {reason}.")
 
     def get_canonical_path(self, relative_str: str) -> Path:
         """Resolve a relative path inside the workspace."""
