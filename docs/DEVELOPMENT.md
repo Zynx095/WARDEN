@@ -64,10 +64,10 @@ python -m pytest -v
 ```
 
 Expected result:
-- **Total Tests Collected:** 65
-- **Passed:** 64
-- **Skipped:** 1 (Symlink breakout test skipped on Windows when unprivileged)
-- **Execution Time:** ~0.35s
+- **Total Tests Collected:** 88
+- **Passed:** 88
+- **Failed:** 0
+- **Execution Time:** ~5.5s
 
 ### 3.2 Execute Targeted Test Suites
 
