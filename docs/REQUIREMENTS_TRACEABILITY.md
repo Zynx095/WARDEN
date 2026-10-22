@@ -15,7 +15,7 @@ This document tracks the mapping between the governing Fetch-A-Thon 3.0 challeng
 
 | ID | Challenge Requirement | Architectural Component | Implementation Status | Verification Method | Evidence Required |
 |---|---|---|---|---|---|
-| **REQ-01** | Register at least one agent on Agentverse | `src/warden/agents/run_agent.py`, `uagents` runner | **IN PROGRESS** (Local agent & mailbox runner tested; awaiting user `AGENTVERSE_MAILBOX_KEY`) | `tests/unit/test_run_agent.py` | Agentverse Agent Address & Profile URL |
+| **REQ-01** | Register at least one agent on Agentverse | `src/warden/agents/run_agent.py`, `uagents` runner | **IN PROGRESS** (Local agent & mailbox runner tested; awaiting Agentverse account mailbox provisioning, see docs/INTEGRATION.md; not verified) | `tests/unit/test_run_agent.py` | Agentverse Agent Address & Profile URL |
 | **REQ-02** | Implement Agent Chat Protocol (ACP) | `src/warden/integrations/acp_adapter.py` | **TESTED** (Official `AgentChatProtocol:0.3.0` verified) | `tests/unit/test_acp_adapter.py`, `test_end_to_end_workflow.py` | Verified ACP interaction logs |
 | **REQ-03** | Discoverable and directly usable through ASI:One | `src/warden/integrations/acp_adapter.py`, `run_agent.py` | **IN PROGRESS** (ACP handler ready; awaiting Agentverse mailbox bridge) | Live query via `asi1.ai` UI | ASI:One discoverable agent link |
 | **REQ-04** | Meaningful tool execution or multi-agent orchestration | `src/warden/execution/executor.py`, `src/warden/audit/auditor.py` | **TESTED** | `tests/integration/test_executor.py`, `test_end_to_end_workflow.py` | Automated test runs & physical disk verification |
@@ -41,9 +41,18 @@ This document tracks the mapping between the governing Fetch-A-Thon 3.0 challeng
 | **SEC-07** | Independent outcome verification against physical disk state | `src/warden/audit/auditor.py` | **TESTED** | `tests/unit/test_audit.py` (7 tests passing) |
 | **SEC-08** | Structured multi-state audit logging (PROPOSED..VERIFIED) | `src/warden/audit/events.py` | **TESTED** | `tests/unit/test_audit.py` (7 tests passing) |
 | **SEC-09** | Adversarial resilience against prompt injections & forged tokens | `tests/security/test_adversarial.py` | **TESTED** | `tests/security/test_adversarial.py` (6 tests passing) |
-| **SEC-10** | Packaging, test discovery, and clean virtual environment | `pyproject.toml`, `.env.example`, `.gitignore` | **TESTED** | `pytest -v` (88 passed, 0 failed) |
+| **SEC-10** | Packaging, test discovery, and clean virtual environment | `pyproject.toml`, `.env.example`, `.gitignore` | **TESTED** | `pytest` (184 passed, 0 failed, 0 warnings) |
 | **SEC-11** | ASI:One structured intent interpretation & error recovery | `src/warden/agents/intent_engine.py` | **TESTED** | `tests/unit/test_intent_engine.py` (7 tests passing) |
 | **SEC-12** | Native Agent Chat Protocol (v0.3.0) handler & approval workflow | `src/warden/integrations/acp_adapter.py` | **TESTED** | `tests/unit/test_acp_adapter.py` (4 tests passing) |
 | **SEC-13** | Primary end-to-end project cleanup workflow | `tests/integration/test_end_to_end_workflow.py` | **TESTED** | `tests/integration/test_end_to_end_workflow.py` (1 test passing) |
 | **SEC-14** | Agent identity hardening (mandatory seed, no hardcoded fallback) | `src/warden/agents/run_agent.py` | **TESTED** | `tests/unit/test_run_agent.py` (11 tests passing) |
 | **SEC-15** | Keystore & secret exclusion hygiene (`private_keys.json`, `.env`) | `.gitignore`, `run_agent.py` | **TESTED** | `test_run_agent.py` (confidentiality checks passing) |
+
+| **SEC-16** | Repo-root `.env` loading, strict validation, weak/placeholder secret rejection | `src/warden/config.py` | **TESTED** | `tests/unit/test_config.py`, `tests/unit/test_setup_assets.py` |
+| **SEC-17** | Stable identity: same seed, same address; safe non-replacing initialization | `src/warden/identity.py`, `scripts/initialize_identity.py` | **TESTED** | `tests/unit/test_identity.py` (address equals installed `Agent(...).address`) |
+| **SEC-18** | Local-only runtime bound to loopback; honest mode reporting | `src/warden/agents/run_agent.py` | **TESTED** (bind constant) / **MANUALLY OBSERVED** (server log showed `127.0.0.1`) | `tests/unit/test_run_agent.py` |
+| **SEC-19** | Approval bound to requester; replay-safe; errors contained; size cap; path scrubbing | `src/warden/integrations/acp_adapter.py`, `warden_agent.py` | **TESTED** | `tests/unit/test_acp_hardening.py` |
+| **SEC-20** | Workspace wipe guards; persisted audit trail without file contents | `src/warden/execution/workspace.py`, `audit/events.py` | **TESTED** | `tests/unit/test_workspace_safety.py` |
+| **SEC-21** | Secret-free diagnostics | `src/warden/doctor.py` | **TESTED** | `tests/unit/test_doctor.py` |
+| **SEC-22** | Deterministic, offline, self-checking synthetic demo | `src/warden/demo.py`, `demo/run_demo.py` | **TESTED** | `tests/integration/test_demo.py` |
+| **SEC-23** | One-command Windows setup, rerunnable, never overwrites `.env`/identity | `scripts/*.ps1` | **MANUALLY VERIFIED** (run twice; `.env` hash unchanged; PowerShell 7 and 5.1) / script syntax **TESTED** | `tests/unit/test_setup_assets.py` |
