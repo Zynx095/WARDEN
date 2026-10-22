@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from uagents import Context, Protocol
 from uagents_core.contrib.protocols.chat import (
     ChatAcknowledgement,
@@ -24,6 +25,8 @@ from warden.models import Action, Decision, ExecutionStatus
 
 logger = logging.getLogger(__name__)
 
+MAX_MESSAGE_CHARS = 4000
+
 
 class WardenACPHandler:
     """Processes incoming Agent Chat Protocol messages through WARDEN's verification core."""
@@ -32,16 +35,48 @@ class WardenACPHandler:
         self,
         warden: WardenAgent,
         intent_engine: Optional[IntentEngine] = None,
+        approvers: Optional[Iterable[str]] = None,
     ) -> None:
         self.warden = warden
         self.intent_engine = intent_engine or IntentEngine()
+        # Senders allowed to approve actions requested by others (WARDEN_APPROVER_ADDRESSES).
+        # By default only the sender that requested an action may approve it.
+        if approvers is None:
+            approvers = [a for a in os.getenv("WARDEN_APPROVER_ADDRESSES", "").split(",")]
+        self.approvers: Set[str] = {a.strip() for a in approvers if a and a.strip()}
+        # action_id -> sender that caused the approval request; only that sender may approve it.
+        self._approval_owners: Dict[str, str] = {}
+
+    def _scrub(self, text: Any) -> str:
+        """Remove local filesystem locations from text sent back to a remote chat peer."""
+        out = str(text)
+        root = self.warden.workspace.root_path
+        for variant in {str(root), root.as_posix(), str(root).replace("\\", "\\\\")}:
+            out = out.replace(variant, "<workspace>")
+        return out
 
     def process_chat_message(
         self,
         msg: ChatMessage,
         sender: str = "asi1_user",
     ) -> Tuple[ChatAcknowledgement, ChatMessage]:
-        """Synchronously process an incoming ACP ChatMessage and generate response messages."""
+        """Process an incoming ACP ChatMessage; never raises, always returns an acknowledgement and reply."""
+        try:
+            return self._process_chat_message(msg, sender)
+        except Exception as exc:  # fail closed: report a generic error, log only the type
+            logger.error("ACP message handling failed: %s", type(exc).__name__)
+            ack = ChatAcknowledgement(timestamp=msg.timestamp, acknowledged_msg_id=msg.msg_id)
+            reply = ChatMessage(content=[TextContent(
+                type="text",
+                text="[WARDEN] The request could not be processed safely. No action was taken.",
+            )])
+            return ack, reply
+
+    def _process_chat_message(
+        self,
+        msg: ChatMessage,
+        sender: str,
+    ) -> Tuple[ChatAcknowledgement, ChatMessage]:
         # 1. Immediately formulate ChatAcknowledgement
         ack = ChatAcknowledgement(
             timestamp=msg.timestamp,
@@ -64,12 +99,27 @@ class WardenACPHandler:
             )
             return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
 
+        if len(user_text) > MAX_MESSAGE_CHARS:
+            reply_text = (
+                f"[WARDEN] Message rejected: {len(user_text)} characters exceeds the "
+                f"{MAX_MESSAGE_CHARS} character limit. No action was taken."
+            )
+            return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
+
         # 3. Check for human approval command in conversation: "APPROVE <action_id>"
         approval_match = re.search(r"^\s*APPROVE\s+([a-f0-9\-]+)", user_text, re.IGNORECASE)
         if approval_match:
             action_id = approval_match.group(1).strip()
+            owner = self._approval_owners.get(action_id)
+            if owner is not None and owner != sender and sender not in self.approvers:
+                logger.warning("Approval attempt by a sender that did not request action %s", action_id[:8])
+                reply_text = (
+                    f"[WARDEN] Approval refused for `{action_id[:8]}`: only the requester or a configured approver "
+                    "may approve it. No action was taken."
+                )
+                return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
             approval_result = self.warden.approve_and_execute(action_id=action_id, approver_id=sender)
-            reply_text = self._format_approval_response(action_id, approval_result)
+            reply_text = self._scrub(self._format_approval_response(action_id, approval_result))
             return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
 
         # 4. Interpret intent into candidate Action proposals
@@ -100,10 +150,12 @@ class WardenACPHandler:
         results: List[Dict[str, Any]] = []
         for action in proposed_actions:
             res = self.warden.handle_action_request(action)
+            if res.get("status") == ExecutionStatus.AWAITING_APPROVAL:
+                self._approval_owners[res.get("pending_id", action.action_id)] = sender
             results.append(res)
 
         # 6. Format structured conversational response
-        reply_text = self._format_pipeline_response(user_text, results)
+        reply_text = self._scrub(self._format_pipeline_response(user_text, results))
         return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
 
     def _format_approval_response(self, action_id: str, res: Dict[str, Any]) -> str:
