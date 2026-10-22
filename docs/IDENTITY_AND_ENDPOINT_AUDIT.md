@@ -5,6 +5,8 @@
 **SDK Inspected:** `uagents` 0.26.1 / `uagents-core` 0.4.12 / Python 3.12.0 (win32)  
 **Branch:** master  
 
+> **Corrections (local readiness phase).** Two statements below were re-checked against the installed SDK source and are superseded by `docs/INTEGRATION.md`: (1) a "mailbox key" is not consumed by uAgents 0.26.1 (the key part of `key@url` is discarded); mailbox provisioning goes through the local inspector `/connect` endpoint with an Agentverse user token; (2) the SDK's embedded server binds `0.0.0.0` unconditionally and always sends a signed "active" status to the Almanac API at startup, so "zero open ports" applies only after WARDEN's loopback restriction. Details of the polling loop in §3.1 were not re-verified.
+
 ---
 
 ## 1. Executive Summary
@@ -80,7 +82,7 @@ For Phase 2B external registration:
    - E.g., a 24-word BIP39 mnemonic or a 64-character random hex string.
    - Set in `.env`: `AGENT_SEED=<secure_seed_phrase>`.
 2. **Deterministic Agent Address Verification:**
-   - Run `python src/warden/agents/run_agent.py --dry-run` to output only the public address without starting network loops.
+   - Run `.\scripts\run.ps1 -ShowAddress` (equivalently `python -m warden.agents.run_agent --show-address`) to print only the public address without starting the server. *(Corrected: an earlier revision of this document referred to a `--dry-run` flag that never existed.)*
 3. **Agentverse Mailbox Provisioning:**
    - In Agentverse dashboard, add the verified `agent1q...` address to establish the mailbox route.
 4. **Almanac & ASI:One Discoverability:**
