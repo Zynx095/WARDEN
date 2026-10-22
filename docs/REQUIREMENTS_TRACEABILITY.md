@@ -41,7 +41,9 @@ This document tracks the mapping between the governing Fetch-A-Thon 3.0 challeng
 | **SEC-07** | Independent outcome verification against physical disk state | `src/warden/audit/auditor.py` | **TESTED** | `tests/unit/test_audit.py` (7 tests passing) |
 | **SEC-08** | Structured multi-state audit logging (PROPOSED..VERIFIED) | `src/warden/audit/events.py` | **TESTED** | `tests/unit/test_audit.py` (7 tests passing) |
 | **SEC-09** | Adversarial resilience against prompt injections & forged tokens | `tests/security/test_adversarial.py` | **TESTED** | `tests/security/test_adversarial.py` (6 tests passing) |
-| **SEC-10** | Packaging, test discovery, and clean virtual environment | `pyproject.toml`, `.env.example`, `.gitignore` | **TESTED** | `pytest -v` (80 passed, 0 failed) |
+| **SEC-10** | Packaging, test discovery, and clean virtual environment | `pyproject.toml`, `.env.example`, `.gitignore` | **TESTED** | `pytest -v` (88 passed, 0 failed) |
 | **SEC-11** | ASI:One structured intent interpretation & error recovery | `src/warden/agents/intent_engine.py` | **TESTED** | `tests/unit/test_intent_engine.py` (7 tests passing) |
 | **SEC-12** | Native Agent Chat Protocol (v0.3.0) handler & approval workflow | `src/warden/integrations/acp_adapter.py` | **TESTED** | `tests/unit/test_acp_adapter.py` (4 tests passing) |
 | **SEC-13** | Primary end-to-end project cleanup workflow | `tests/integration/test_end_to_end_workflow.py` | **TESTED** | `tests/integration/test_end_to_end_workflow.py` (1 test passing) |
+| **SEC-14** | Agent identity hardening (mandatory seed, no hardcoded fallback) | `src/warden/agents/run_agent.py` | **TESTED** | `tests/unit/test_run_agent.py` (11 tests passing) |
+| **SEC-15** | Keystore & secret exclusion hygiene (`private_keys.json`, `.env`) | `.gitignore`, `run_agent.py` | **TESTED** | `test_run_agent.py` (confidentiality checks passing) |
