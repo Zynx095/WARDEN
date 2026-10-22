@@ -35,7 +35,7 @@ from warden.identity import AgentIdentityError, derive_agent_address, validate_s
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 MIN_PYTHON = (3, 10)
 REQUIRED_PACKAGES = ["uagents", "uagents-core", "pydantic", "python-dotenv"]
-OPTIONAL_PACKAGES = ["openai", "httpx", "pytest"]
+OPTIONAL_PACKAGES = ["openai", "pytest"]
 
 
 @dataclass
