@@ -46,7 +46,11 @@ def test_primary_cleanup_workflow_end_to_end(disposable_workspace: Workspace):
     initial_env_content = (disposable_workspace.root_path / "production.env").read_text(encoding="utf-8")
 
     warden = WardenAgent(workspace=disposable_workspace)
-    acp_handler = WardenACPHandler(warden=warden, intent_engine=IntentEngine(api_key=None))
+    acp_handler = WardenACPHandler(
+        warden=warden,
+        intent_engine=IntentEngine(api_key=None),
+        approvers={"security_officer"},
+    )
 
     # Step 1: User issues cleanup query through ACP
     user_prompt = "Clean up this project directory. Remove temporary files, but preserve protected configuration."
