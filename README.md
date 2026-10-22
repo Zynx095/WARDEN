@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-88%20Passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-184%20Passed-success.svg)](tests/)
 [![Protocol](https://img.shields.io/badge/Protocol-AgentChatProtocol%20v0.3.0-purple.svg)](https://uagents.fetch.ai/)
 
 ---
@@ -71,79 +71,114 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architectural specific
 
 ---
 
-## 4. Implementation Status
+## 4. Quick Start (Windows PowerShell)
 
-### ✅ Implemented & Locally Verified (Phase 0 + Phase 1)
-- **Agent Chat Protocol (ACP v0.3.0):** Native integration using `uagents_core.contrib.protocols.chat`. Implements full interaction cycle: `ChatMessage` -> `ChatAcknowledgement` -> Conversational Pipeline Response.
-- **ASI:One Intent Engine (`src/warden/agents/intent_engine.py`):** Structured intent interpretation using the ASI:One API (`asi1-mini` via OpenAI-compatible endpoint) with automatic deterministic fallback for offline tests.
-- **Agentverse Runner (`src/warden/agents/run_agent.py`):** Configures and launches a live `uagents.Agent` with deterministic address generation and Agentverse Mailbox bridging.
-- **Deterministic Policy Engine (`src/warden/security/policy.py`):** Evaluates `ALLOW`, `BLOCK`, and `REQUIRE_APPROVAL` deterministically. Protected resources (`.env`, `production.env`, `secrets.json`, `credentials.json`) cannot be modified or deleted (`WDN-003`).
-- **Canonical Workspace Boundary Enforcement (`src/warden/security/path_validation.py`):** Resolves canonical paths and strictly enforces containment. Rejects parent directory traversal (`..`), absolute paths, Windows drive paths (`C:`), UNC paths (`\\share`), device names (`CON`, `NUL`), Alternate Data Streams (`:`), and symlink breakouts (`WDN-002`).
-- **Cryptographic Authorization Manager (`src/warden/security/authorization.py`):** Issues and verifies HMAC-SHA256 authorization tokens bound to action parameters, workspace root, and time-to-live. LLMs cannot fabricate authorization.
-- **Human-in-the-Loop Pending Approvals:** Destructive actions (`DELETE`, `RENAME`) pause execution in `AWAITING_APPROVAL` until explicit human approval (`APPROVE <action_id>`) is provided via conversation.
-- **Controlled Sandbox Executor (`src/warden/execution/executor.py`):** Rejects unauthorized requests, validates parameters independently, and executes operations safely within `Workspace`.
-- **Independent Outcome Auditor (`src/warden/audit/auditor.py`):** Validates actual disk state post-execution; never relies on self-reported tool success flags.
-- **Structured Audit Logging (`src/warden/audit/events.py`):** Multi-state lifecycle tracking (`PROPOSED`, `AUTHORIZED`, `BLOCKED`, `AWAITING_APPROVAL`, `EXECUTED`, `VERIFIED`, `FAILED`).
-- **Adversarial Resilience (`tests/security/test_adversarial.py`):** Tested against prompt injections in reason strings and file contents, forged authorization tokens, and simulated fake execution claims.
-- **Agent Identity Hardening (`src/warden/agents/run_agent.py`):** Mandatory seed configuration; all hardcoded predictable fallback seeds removed. Fail-closed error handling with `AgentIdentityError`. Keystores and private keys strictly excluded from version control.
-- **Automated Test Suite:** 88 tests collected, 88 passed, 0 failed.
+Requires Python 3.10+ (3.12 recommended) and Git. No accounts or API keys are needed.
 
-### 🔄 External Deployment Readiness
-- **Agent Seed:** Configure `AGENT_SEED` in `.env` or supply via `--seed`. Inspect derived address with `python src/warden/agents/run_agent.py --show-address`.
-- **Agentverse Mailbox Key:** Set `AGENTVERSE_MAILBOX_KEY` in `.env` to connect to Agentverse without public port forwarding.
-- **ASI:One Discoverability:** With mailbox connected, the agent is registered on the Almanac and discoverable at `https://asi1.ai`.
-
----
-
-## 5. Quickstart & Installation
-
-### 5.1 Installation
-```bash
+```powershell
 git clone https://github.com/Zynx095/WARDEN.git
 cd WARDEN
-
-# Virtual environment setup
-python -m venv .venv
-
-# On Windows:
-.\.venv\Scripts\Activate.ps1
-# On Linux/macOS:
-source .venv/bin/activate
-
-# Install dependencies in editable mode
-pip install -e ".[dev,fetch]"
-
-# Configuration template
-cp .env.example .env
+powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1   # venv, dependencies, .env, identity, tests, doctor
+.\scripts\demo.ps1                                              # offline security demonstration
+.\scripts\run.ps1                                               # start the local agent (127.0.0.1 only)
 ```
 
-### 5.2 Running the Interactive Demo
-```bash
-python demo/run_demo.py
-```
-Demonstrates all 5 scenarios including safe file operations, prompt injection shielding, workspace containment, approval gating, and native ACP conversational cleanup.
+`setup.ps1` is safe to rerun: it never overwrites an existing `.env`, identity or workspace.
 
-### 5.3 Running the Automated Test Suite
-```bash
-python -m pytest -v
-```
+| Command | Purpose |
+|---|---|
+| `.\scripts\setup.ps1` | Create `.venv`, install from `pyproject.toml`, create `.env` from the template if missing, generate an agent identity if none exists, run tests and diagnostics (`-SkipTests`, `-NoOptional`) |
+| `.\scripts\doctor.ps1` | Diagnose config, identity, dependencies, Git secret hygiene, workspace, port, integration readiness (`-Tests` also runs pytest). Never prints secrets |
+| `.\scripts\test.ps1` | Compile everything and run pytest; extra arguments pass through (`-k acp -x`) |
+| `.\scripts\demo.ps1` | Run the deterministic demo in `temp_demo_workspace`; exits non-zero if any independent check fails |
+| `.\scripts\run.ps1` | Start the agent. `-ShowAddress` prints the public address and exits; `-Port 8001`; `-Mailbox` opts in to mailbox mode |
 
-### 5.4 Starting the Live WARDEN Agent (uAgents / Agentverse)
-```bash
-# Safely inspect derived address without starting server:
-python src/warden/agents/run_agent.py --seed "your_secure_seed_phrase" --show-address
+Manual equivalents with the project interpreter: `.\.venv\Scripts\python.exe -m pytest`, `-m warden.doctor`,
+`-m warden.identity address`, `demo\run_demo.py`, `-m warden.agents.run_agent`.
 
-# Launch agent runner:
-python src/warden/agents/run_agent.py --seed "your_secure_seed_phrase"
-```
-Starts the agent, prints its unique Fetch.ai address (`agent1q...`), attaches the `AgentChatProtocol`, and begins listening for incoming messages.
+### What the demo shows
+
+Everything happens in a disposable workspace of synthetic files, offline, through the normal pipeline:
+workspace inspection; a "clean up temporary files" request; deterministic policy evaluation (`WDN-004`);
+a safe `CREATE` that is authorized, executed and verified; human approval of the held deletions; an
+attempt to delete a protected config file blocked by `WDN-003` before execution (even with a
+prompt-injection reason); independent verification with plain `os`/`hashlib`; and a persisted JSONL
+audit record. 12 checks must pass.
 
 ---
 
-## 6. Project Documentation Directory
+## 5. Implementation Status
+
+Three levels are kept apart on purpose.
+
+**Implemented and locally tested** (automated tests, mocks for external services; 184 tests):
+
+- Deterministic policy engine, canonical workspace containment, protected files (`WDN-001..004`).
+- HMAC-SHA256 authorization tokens bound to action, target, workspace and expiry; fresh random key per process (persistence is not needed, see Configuration).
+- Restricted executor, independent outcome auditor, JSONL audit trail.
+- Approval workflow: destructive actions wait for approval; only the requester (or a configured approver) can approve; replays fail.
+- Agent Chat Protocol 0.3.0 handlers: errors contained, messages capped at 4000 characters, workspace paths scrubbed from replies.
+- Stable agent identity: the same `AGENT_SEED` gives the same address on every start, verified equal to the installed uAgents derivation.
+- Repo-root `.env` loading independent of the working directory; strict validation; placeholder and weak secrets rejected.
+- Local-only runtime bound to `127.0.0.1`; one-command Windows setup, diagnostics and demo.
+
+**Implemented, not verified** (needs an Agentverse account; nothing below has been run):
+
+- Mailbox mode (`-Mailbox`), external endpoint mode (`--endpoint`), ASI:One LLM intent parsing (`ASI_ONE_API_KEY`).
+
+**Not done** (external): Agentverse mailbox provisioning, agent registration and discovery, any live ASI:One conversation, shared chat URL, demo video. See [docs/INTEGRATION.md](docs/INTEGRATION.md) for the exact steps and the distinction between local-only, mailbox, endpoint, discovery and ASI:One.
+
+---
+
+## 6. Configuration
+
+Settings are read from the process environment, with the repository-root `.env` merged in by the runner,
+doctor and scripts (real environment variables win; `WARDEN_ENV_FILE` selects another file). Relative
+paths are resolved against the repository root. `.env.example` documents every variable.
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `AGENT_SEED` | **Yes** (to run the agent) | none | Secret. 16+ chars, not a placeholder. Generated by setup; never replaced once set |
+| `WARDEN_WORKSPACE_ROOT` | No | `./temp_workspace` | Disposable directory. Repo root, home, drive roots and Git directories are refused for cleanup |
+| `WARDEN_AUDIT_LOG` | No | `./logs/audit.jsonl` | Empty value disables persistence |
+| `WARDEN_LOG_LEVEL` | No | `INFO` | `DEBUG` to `CRITICAL` |
+| `WARDEN_AGENT_PORT` | No | `8000` | Loopback port |
+| `WARDEN_SECRET_KEY` | No | random per process | Token signing key. If set: 32+ chars, not a placeholder. Not needed across restarts: tokens and approvals are in-memory and expire in 5 minutes |
+| `WARDEN_APPROVER_ADDRESSES` | No | empty | Comma-separated senders allowed to approve actions requested by others |
+| `WARDEN_USE_MAILBOX` | No | `false` | Opt in to mailbox mode; connects nothing by itself |
+| `WARDEN_ENFORCE_WORKSPACE_CONTAINMENT`, `WARDEN_REQUIRE_APPROVAL_FOR_DESTRUCTIVE` | No | `true` | Always enforced; `false` is rejected |
+| `ASI_ONE_API_KEY`, `ASI_ONE_BASE_URL`, `ASI_ONE_MODEL` | No | unset | Optional LLM intent parsing; otherwise a deterministic rule-based parser is used |
+| `AGENTVERSE_AGENT_NAME` | No | `warden-verification-agent` | Display name only; does not affect the address |
+
+### Identity and secrets
+
+- Inspect the public address without touching the seed: `.\scripts\run.ps1 -ShowAddress`.
+- The seed lives only in `.env` (ignored by Git). Back it up privately: losing it changes the agent address, sharing it lets someone impersonate the agent.
+- To rotate, edit `.env` yourself on purpose. WARDEN will not replace an existing seed, and `--seed` on the command line is discouraged because it ends up in shell history.
+- Do not commit `.env`, `logs/`, `private_keys.json` or workspaces. `doctor.ps1` checks the Git exclusions.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `running scripts is disabled on this system` | `powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1` |
+| `AGENT_SEED still contains a template placeholder` or `not configured` | `.\scripts\setup.ps1` (or `.\.venv\Scripts\python.exe -m warden.identity init`) |
+| `AGENT_SEED is already configured. Refusing to replace` | Intended. Edit `.env` manually if you really want a new identity |
+| `Project virtual environment not found` | Run `.\scripts\setup.ps1` |
+| Doctor: `Port 8000 ... in use` | Another process owns it; use `.\scripts\run.ps1 -Port 8001` |
+| `Refusing to delete workspace contents` | `WARDEN_WORKSPACE_ROOT` points at a repo, home or drive root; choose a dedicated folder |
+| `... must be one of true/false/...` or `cannot be disabled` | Fix the named variable in `.env` |
+| Windows Firewall prompt on first run | The agent binds loopback only; you can decline network access |
+| Agent logs `No endpoints provided. Skipping registration` | Expected in local-only mode |
+
+---
+
+## 7. Project Documentation Directory
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Architectural specification, trust boundaries, and protocol details.
+- [docs/INTEGRATION.md](docs/INTEGRATION.md) — Local-only vs mailbox vs endpoint vs discovery vs ASI:One; verified SDK behaviour; next steps.
 - [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) — Threat model, attack vectors, mitigations, and residual risks.
+- [docs/LOCAL_READINESS_AUDIT.md](docs/LOCAL_READINESS_AUDIT.md) — Local setup audit: findings and their resolution.
 - [docs/IDENTITY_AND_ENDPOINT_AUDIT.md](docs/IDENTITY_AND_ENDPOINT_AUDIT.md) — Agent identity hardening and endpoint connectivity audit.
 - [docs/REQUIREMENTS_TRACEABILITY.md](docs/REQUIREMENTS_TRACEABILITY.md) — Challenge requirement mapping and verification evidence.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — Developer setup, testing guidelines, and contribution rules.
@@ -152,6 +187,6 @@ Starts the agent, prints its unique Fetch.ai address (`agent1q...`), attaches th
 
 ---
 
-## 7. License
+## 8. License
 
 This project is licensed under the Apache License 2.0. See the LICENSE file for details.
