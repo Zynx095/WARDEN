@@ -59,6 +59,41 @@ class Action(BaseModel):
     correlation_id: Optional[str] = None
     timestamp: datetime = Field(default_factory=_now_utc)
 
+    def __init__(
+        self,
+        operation: str = "",
+        target: str = "",
+        reason: str = "",
+        action_id: Optional[str] = None,
+        destination: Optional[str] = None,
+        content: Optional[str] = None,
+        actor_id: Optional[str] = None,
+        correlation_id: Optional[str] = None,
+        timestamp: Optional[datetime] = None,
+        **kwargs: Any,
+    ) -> None:
+        data: Dict[str, Any] = {}
+        if operation:
+            data["operation"] = operation
+        if target:
+            data["target"] = target
+        if reason:
+            data["reason"] = reason
+        if action_id:
+            data["action_id"] = action_id
+        if destination:
+            data["destination"] = destination
+        if content:
+            data["content"] = content
+        if actor_id:
+            data["actor_id"] = actor_id
+        if correlation_id:
+            data["correlation_id"] = correlation_id
+        if timestamp is not None:
+            data["timestamp"] = timestamp
+        data.update(kwargs)
+        super().__init__(**data)
+
 
 class PolicyResult(BaseModel):
     """Decision returned by deterministic policy evaluation."""
@@ -70,6 +105,32 @@ class PolicyResult(BaseModel):
     decision_id: str = Field(default_factory=_generate_uuid)
     timestamp: datetime = Field(default_factory=_now_utc)
     context: Dict[str, Any] = Field(default_factory=dict)
+
+    def __init__(
+        self,
+        decision: Optional[Decision] = None,
+        policy_id: Optional[str] = None,
+        reason: Optional[str] = None,
+        decision_id: Optional[str] = None,
+        timestamp: Optional[datetime] = None,
+        context: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        data: Dict[str, Any] = {}
+        if decision is not None:
+            data["decision"] = decision
+        if policy_id is not None:
+            data["policy_id"] = policy_id
+        if reason is not None:
+            data["reason"] = reason
+        if decision_id is not None:
+            data["decision_id"] = decision_id
+        if timestamp is not None:
+            data["timestamp"] = timestamp
+        if context is not None:
+            data["context"] = context
+        data.update(kwargs)
+        super().__init__(**data)
 
 
 class AuthorizationToken(BaseModel):
