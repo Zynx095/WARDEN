@@ -1,6 +1,7 @@
-"""Interactive demonstration of WARDEN autonomous action verification."""
+"""Interactive demonstration of WARDEN autonomous action verification and ACP integration."""
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -8,8 +9,16 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+from uagents_core.contrib.protocols.chat import ChatMessage, TextContent
 from warden.agents.warden_agent import WardenAgent
 from warden.execution.workspace import Workspace
+from warden.integrations.acp_adapter import WardenACPHandler
 from warden.models import Action
 
 
@@ -20,7 +29,7 @@ def print_step(title: str):
 
 
 def main():
-    print_step("WARDEN: Autonomous Action Verification Engine (Demo)")
+    print_step("WARDEN: Autonomous Action Verification & ACP Integration Demo")
 
     demo_dir = Path("./temp_demo_workspace").resolve()
     workspace = Workspace(demo_dir)
@@ -93,6 +102,34 @@ def main():
     print(f"<- Post-Approval Result: {res4_approved['status']}")
     print(f"   Executed: {res4_approved['executed']} | Verified on disk: {res4_approved['verified']}")
     print(f"   Target on disk exists? {workspace.exists('stale_cache.bin')}")
+
+    # Scenario 5: Native Agent Chat Protocol (ACP) Conversational Interaction
+    print_step("Scenario 5: Agent Chat Protocol (ACP) Conversational Interaction")
+    workspace.create_synthetic_file("temp_session.tmp", "SESSION_CACHE_EXPIRED")
+    workspace.create_synthetic_file("production.env", "SECRET_KEY=keep_this_safe")
+    print(f"-> Synthetic files prepared in workspace: 'temp_session.tmp', 'production.env'")
+
+    acp_handler = WardenACPHandler(warden=warden)
+
+    prompt = "Clean up temporary session files, and delete production.env"
+    print(f"-> User query via ACP (ASI:One): \"{prompt}\"")
+    in_msg = ChatMessage(content=[TextContent(type="text", text=prompt)])
+    ack, acp_reply = acp_handler.process_chat_message(in_msg, sender="asi1_user")
+
+    print(f"<- ACP Acknowledgement returned: MsgID={ack.acknowledged_msg_id}")
+    print(f"<- ACP Assistant Reply:\n{acp_reply.content[0].text}\n")
+
+    # Extract pending action ID to simulate human approval in chat
+    match = re.search(r"APPROVE\s+([a-f0-9\-]+)", acp_reply.content[0].text)
+    if match:
+        pending_id = match.group(1)
+        print(f"-> User approves destructive action via ACP: \"APPROVE {pending_id}\"")
+        approval_msg = ChatMessage(content=[TextContent(type="text", text=f"APPROVE {pending_id}")])
+        _, approval_reply = acp_handler.process_chat_message(approval_msg, sender="asi1_user")
+        print(f"<- ACP Assistant Reply:\n{approval_reply.content[0].text}")
+
+    print(f"-> Checking physical disk: 'production.env' exists? {workspace.exists('production.env')}")
+    print(f"-> Checking physical disk: 'temp_session.tmp' exists? {workspace.exists('temp_session.tmp')}")
 
     # Summary of Audit Events
     print_step("Audit Log Summary")
