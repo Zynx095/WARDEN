@@ -56,7 +56,7 @@ def test_primary_cleanup_workflow_end_to_end(disposable_workspace: Workspace):
     assert ack.acknowledged_msg_id == inbound_acp_msg.msg_id
 
     reply_text = acp_reply.content[0].text
-    assert "WARDEN Action Verification Report" in reply_text
+    assert "Action Verification Report" in reply_text
     assert "[AWAITING APPROVAL]" in reply_text
 
     # Extract pending action IDs from the reply

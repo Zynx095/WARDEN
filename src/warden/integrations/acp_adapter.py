@@ -110,26 +110,26 @@ class WardenACPHandler:
         """Format the response after a human approval decision."""
         if res.get("status") == ExecutionStatus.VERIFIED:
             return (
-                f"🛡️ **WARDEN Approval Execution Verified**\n"
-                f"- **Action ID:** `{action_id}`\n"
-                f"- **Status:** `VERIFIED`\n"
-                f"- **Execution:** Successfully executed.\n"
-                f"- **Physical Verification:** {res.get('verification_details')}\n"
+                f"[WARDEN] Action Approval Execution Verified\n"
+                f"- Action ID: `{action_id}`\n"
+                f"- Status: `VERIFIED`\n"
+                f"- Execution: Successfully executed.\n"
+                f"- Physical Verification: {res.get('verification_details')}\n"
             )
         else:
             return (
-                f"❌ **WARDEN Approval Execution Failed**\n"
-                f"- **Action ID:** `{action_id}`\n"
-                f"- **Status:** `{res.get('status')}`\n"
-                f"- **Error:** {res.get('error')}\n"
+                f"[WARDEN] Action Approval Execution Failed\n"
+                f"- Action ID: `{action_id}`\n"
+                f"- Status: `{res.get('status')}`\n"
+                f"- Error: {res.get('error')}\n"
             )
 
     def _format_pipeline_response(self, prompt: str, results: List[Dict[str, Any]]) -> str:
         """Format structured verification details for ASI:One chat."""
         lines = [
-            f"🛡️ **WARDEN Action Verification Report**",
-            f"*Query:* \"{prompt}\"",
-            f"Evaluated **{len(results)}** proposed operation(s):\n",
+            f"[WARDEN] Action Verification Report",
+            f"Query: \"{prompt}\"",
+            f"Evaluated {len(results)} proposed operation(s):\n",
         ]
 
         for idx, r in enumerate(results, 1):
@@ -175,12 +175,16 @@ def create_acp_protocol(
     proto = Protocol(spec=chat_protocol_spec)
     handler = WardenACPHandler(warden=warden, intent_engine=intent_engine)
 
-    @proto.on_message(model=ChatMessage, replies={ChatAcknowledgement, ChatMessage})
+    @proto.on_message(model=ChatMessage)
     async def handle_message(ctx: Context, sender: str, msg: ChatMessage):
         ctx.logger.info(f"Received ACP ChatMessage from {sender}")
         ack, reply = handler.process_chat_message(msg, sender=sender)
         await ctx.send(sender, ack)
         await ctx.send(sender, reply)
         ctx.logger.info(f"Sent ACP response to {sender}")
+
+    @proto.on_message(model=ChatAcknowledgement)
+    async def handle_acknowledgement(ctx: Context, sender: str, ack: ChatAcknowledgement):
+        ctx.logger.info(f"Received ACP ChatAcknowledgement from {sender} for msg {ack.acknowledged_msg_id}")
 
     return proto
