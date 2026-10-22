@@ -76,3 +76,19 @@
 1. **Host-Level Denial of Service (Disk Exhaustion):** While operations are contained in the workspace, writing excessively large files could exhaust disk space. *Future mitigation: Workspace quota enforcement.*
 2. **Time-of-Check to Time-of-Use (TOCTOU):** In highly concurrent multi-threaded environments, a file could potentially be renamed between validation and execution. *Mitigation in Phase 0: WARDEN executes actions synchronously within an isolated workspace per session.*
 3. **Windows Symlink Privileges:** On Windows, creating symlinks requires Developer Mode or elevated privileges. WARDEN handles this gracefully by rejecting unsafe path resolution and skipping unprivileged symlink creation in tests while retaining path validation rules.
+
+---
+
+## 5. Local-Runtime Threats Added in the Local Readiness Phase
+
+| # | Threat | Mitigation | Residual |
+|---|---|---|---|
+| T-10 | **LAN exposure of the agent.** The uAgents server hardcodes `0.0.0.0`; a local agent would answer on every interface. | The runner sets `uagents.asgi.HOST` to `127.0.0.1` before `run()` and refuses to start if the SDK has no such constant. `--bind-all` is explicit. | Relies on an SDK internal; a future SDK may change it (the runner then fails closed). |
+| T-11 | **Placeholder or predictable seed** (the template string used as a real identity). | `validate_seed` rejects empty, placeholder and short seeds; the template ships `AGENT_SEED=` empty; `init` generates 256 random bits and never replaces an existing seed. | A user-chosen weak 16+ character seed is accepted. |
+| T-12 | **Cross-sender approval.** Another chat peer sends `APPROVE <id>` for someone else's pending deletion. | Approval is bound to the requesting sender; extra approvers must be listed in `WARDEN_APPROVER_ADDRESSES`. Replays fail without executing. | Approver list and sender addresses are trusted as delivered by the SDK. |
+| T-13 | **Credential forwarding.** An unrelated `OPENAI_API_KEY` was sent to the ASI:One endpoint. | Only `ASI_ONE_API_KEY` is used; the demo and tests use an offline engine that reads no key. | With a key configured, request text and workspace file names go to the configured endpoint. |
+| T-14 | **Information leakage in replies/logs.** Local paths in error text; stack traces. | Workspace paths are scrubbed from replies; handler failures return a fixed message and log only the exception type; seeds are never logged. | Paths outside the workspace root are not recognised by the scrubber. |
+| T-15 | **Destructive demo/cleanup against the wrong directory.** | `Workspace.clean/teardown` refuse repository ancestors, home, drive roots and Git directories; the doctor flags such a `WARDEN_WORKSPACE_ROOT`. | A dedicated directory that is merely important (not a repo) is still wipeable by design. |
+| T-16 | **Silent security misconfiguration.** `...=ture` parsed as false; safety toggles that do nothing. | Strict boolean parsing; the two safety toggles reject `false`; weak `WARDEN_SECRET_KEY` rejected. | None known. |
+| T-17 | **Unexpected outbound traffic in local mode.** | Telemetry disabled locally. uAgents 0.26.1 still sends one signed "active" status with the public agent identifier to the Almanac API at startup and "inactive" at shutdown (documented in INTEGRATION.md). | Cannot be disabled via the constructor. |
+| T-18 | **Message flooding / oversized input.** | Messages over 4000 characters are rejected before intent parsing. | No rate limiting; pending approvals are an unbounded in-memory dict. |
