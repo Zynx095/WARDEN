@@ -105,3 +105,16 @@ def test_mocked_asi_one_llm_error_falls_back():
     assert len(actions) >= 1
     assert actions[0].operation == "DELETE"
     assert actions[0].target == "cache.tmp"
+
+
+def test_unrelated_openai_key_is_never_sent_to_asi_one(monkeypatch):
+    """An OPENAI_API_KEY in the environment must not be picked up and forwarded to the ASI:One endpoint."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-unrelated-openai-key")
+    engine = IntentEngine()
+    assert engine.api_key is None and engine.client is None
+
+
+def test_offline_engine_ignores_configured_key(monkeypatch):
+    monkeypatch.setenv("ASI_ONE_API_KEY", "asi-test-key")
+    engine = IntentEngine(offline=True)
+    assert engine.api_key is None and engine.client is None
