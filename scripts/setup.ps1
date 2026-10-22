@@ -85,10 +85,8 @@ if (Test-Path -LiteralPath $envFile) {
 # 6. Secrets excluded from Git ----------------------------------------------------------
 Write-Step 'Checking Git exclusions'
 if (Get-Command git -ErrorAction SilentlyContinue) {
-    & git -C $Root check-ignore -q .env
-    if ($LASTEXITCODE -ne 0) { Stop-WithError '.env is NOT ignored by Git.' "Add '.env' to .gitignore before continuing." }
-    & git -C $Root ls-files --error-unmatch .env 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) { Stop-WithError '.env is tracked by Git.' 'Run: git rm --cached .env  (then rotate AGENT_SEED)' }
+    if ((Test-Native git -C $Root check-ignore -q .env) -ne 0) { Stop-WithError '.env is NOT ignored by Git.' "Add '.env' to .gitignore before continuing." }
+    if ((Test-Native git -C $Root ls-files --error-unmatch .env) -eq 0) { Stop-WithError '.env is tracked by Git.' 'Run: git rm --cached .env  (then rotate AGENT_SEED)' }
     Write-Ok '.env is ignored and untracked'
 } else {
     Write-Warn 'git not found; could not verify .env exclusion'
@@ -96,8 +94,10 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 
 # 7. Identity (created only when absent; never replaced) --------------------------------
 Write-Step 'Agent identity'
-$code = Invoke-Venv -m warden.identity address 2>$null
-if ($code -ne 0) {
+$code = Test-Venv -m warden.identity address
+if ($code -eq 0) {
+    $null = Invoke-Venv -m warden.identity address   # show the public address only
+} else {
     Write-Host 'No valid AGENT_SEED configured; generating one into .env (the seed is not printed).'
     $code = Invoke-Venv -m warden.identity init
     if ($code -ne 0) { Stop-WithError 'Identity initialization failed.' 'See the message above; an existing seed is never replaced.' }

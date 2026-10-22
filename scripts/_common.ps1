@@ -37,3 +37,34 @@ function Invoke-Venv {
         Pop-Location
     }
 }
+
+# Same as Invoke-Venv but discards all output; returns only the exit code. Used for silent probes.
+# ErrorActionPreference is relaxed locally because Windows PowerShell 5.1 turns redirected native
+# stderr into terminating errors under 'Stop'.
+function Test-Venv {
+    $py = Get-VenvPython
+    $pyArgs = $args
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    Push-Location $Root
+    try {
+        $null = & $py @pyArgs 2>&1
+        return $LASTEXITCODE
+    } finally {
+        Pop-Location
+        $ErrorActionPreference = $previous
+    }
+}
+
+# Run any native command silently and return its exit code (see Test-Venv for why EAP is relaxed).
+function Test-Native {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $rest = @($args | Select-Object -Skip 1)
+        $null = & $args[0] @rest 2>&1
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
