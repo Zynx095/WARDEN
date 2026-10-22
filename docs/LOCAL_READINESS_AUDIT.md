@@ -55,3 +55,37 @@ Therefore persistence is **not required**: a fresh per-process random key is the
 ## 5. Remediation plan (executed in the commits that follow)
 
 Config/env loading (F1, F4, F5) → identity module and placeholder rejection (F2, F3, F8) → runner uses both (F1, F2) → ACP hardening (F6, F7) → workspace guard (F11) → PowerShell automation → deterministic demo with persisted audit (F10, F12) → tests → docs (F8, F9, F13).
+
+## 6. Resolution (end of the local readiness phase)
+
+| # | Status | Resolution |
+|---|---|---|
+| F1 | Fixed | `config.load_environment()` loads the repo-root `.env` (or `WARDEN_ENV_FILE`) in the runner, doctor, identity CLI and scripts; real environment variables win. Library code stays side-effect free. |
+| F2 | Fixed | `warden.identity.validate_seed` rejects empty, placeholder and short seeds; the template ships `AGENT_SEED=` empty. |
+| F3 | Fixed | `scripts/initialize_identity.py` delegates to `warden.identity`; the printed address is derived exactly as at runtime. Verified against `Agent(...).address`. |
+| F4 | Fixed | Relative paths resolve against the repository root. Test: CWD-independent. |
+| F5 | Fixed, documented | Optional key, validated when set, random per process otherwise (persistence not required, see §3). Documented in `.env.example` and the README. |
+| F6 | Fixed | Approvals are bound to the requesting sender plus `WARDEN_APPROVER_ADDRESSES`. |
+| F7 | Fixed | Errors contained, 4000 character cap, paths scrubbed. |
+| F8 | Fixed | `--dry-run` never existed; documentation points to `--show-address` / `.\scripts\run.ps1 -ShowAddress`. |
+| F9 | Fixed | PowerShell-native instructions; the seed never needs to be typed. |
+| F10 | Fixed | New synthetic, self-checking, offline demo (`warden.demo`), run by tests twice to prove repeatability. |
+| F11 | Fixed | `Workspace.clean/teardown` refuse repo/home/drive roots and Git directories. |
+| F12 | Fixed | `WARDEN_AUDIT_LOG` JSONL persistence (default `logs/audit.jsonl`, ignored by Git). |
+| F13 | Fixed | `uagents>=0.26.1,<0.27` is a core dependency; unused `httpx` dropped; `openai` stays optional. |
+| F14 | Left as is | Compatibility shim still imported by an existing test. |
+| F15 | Fixed | The runner passes an explicit event loop; the suite runs with zero warnings. |
+
+### Additional findings discovered while implementing
+
+| # | Finding | Resolution |
+|---|---|---|
+| F16 | `AGENTVERSE_MAILBOX_KEY` is not consumed by uAgents 0.26.1 (`parse_agentverse_config` discards it). The previous log line also printed part of it. | Treated as a deprecated mode switch with a warning; nothing is printed. |
+| F17 | `WARDEN_ENFORCE_WORKSPACE_CONTAINMENT` and `WARDEN_REQUIRE_APPROVAL_FOR_DESTRUCTIVE` were parsed but never read; `ture` parsed as false. | Strict parsing; `false` is rejected as these controls are always enforced. |
+| F18 | `IntentEngine` fell back to `OPENAI_API_KEY` and sent it to `api.asi1.ai`. | Removed; added `offline=True`. |
+| F19 | The SDK binds `0.0.0.0` and always posts an "active" status to the Almanac API, even with no endpoint. | Loopback binding enforced by the runner; the status call is documented, not hidden. |
+| F20 | A replayed `APPROVE` raised an uncaught `AuthorizationError`. | Returns a failed result. |
+
+### Not resolved here (needs external accounts or is out of scope)
+
+Agentverse mailbox provisioning, registration, discovery and ASI:One conversations were not attempted or verified. See `docs/INTEGRATION.md`.
