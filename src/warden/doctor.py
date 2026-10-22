@@ -99,9 +99,7 @@ def check_configuration(env_file: Optional[Path] = None) -> List[Check]:
 
     try:
         cfg = WardenConfig()
-        checks.append(Check(PASS, "Settings parse", f"log level {cfg.log_level}, containment and approval defaults honoured"))
-        if not cfg.enforce_workspace_containment or not cfg.require_approval_for_destructive:
-            checks.append(Check(WARN, "Security toggles", "a safety setting is disabled in configuration"))
+        checks.append(Check(PASS, "Settings parse", f"log level {cfg.log_level}; containment and approval enforced"))
     except ConfigError as exc:
         checks.append(Check(FAIL, "Settings parse", str(exc), "Fix the named variable in .env"))
 

@@ -73,6 +73,17 @@ def env_bool(name: str, default: bool) -> bool:
     raise ConfigError(f"{name} must be one of true/false/1/0/yes/no/on/off (got an unrecognised value).")
 
 
+def _always_on(name: str) -> bool:
+    """Safety controls that the pipeline enforces unconditionally.
+
+    The policy engine always applies workspace containment and destructive-action approval, so
+    these settings can only be left on. Turning one off is rejected rather than silently ignored.
+    """
+    if not env_bool(name, True):
+        raise ConfigError(f"{name} cannot be disabled: this control is always enforced.")
+    return True
+
+
 def _log_level() -> str:
     level = os.getenv("WARDEN_LOG_LEVEL", "INFO").strip().upper() or "INFO"
     if level not in VALID_LOG_LEVELS:
@@ -117,10 +128,10 @@ class WardenConfig(BaseModel):
     log_level: str = Field(default_factory=_log_level)
     workspace_root: Path = Field(default_factory=_workspace_root)
     enforce_workspace_containment: bool = Field(
-        default_factory=lambda: env_bool("WARDEN_ENFORCE_WORKSPACE_CONTAINMENT", True)
+        default_factory=lambda: _always_on("WARDEN_ENFORCE_WORKSPACE_CONTAINMENT")
     )
     require_approval_for_destructive: bool = Field(
-        default_factory=lambda: env_bool("WARDEN_REQUIRE_APPROVAL_FOR_DESTRUCTIVE", True)
+        default_factory=lambda: _always_on("WARDEN_REQUIRE_APPROVAL_FOR_DESTRUCTIVE")
     )
     audit_log: Optional[Path] = Field(default_factory=_audit_log)
     secret_key: str = Field(default_factory=_secret_key, repr=False)

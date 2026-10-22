@@ -69,6 +69,14 @@ def test_malformed_boolean_is_an_error_not_false(monkeypatch, value):
         WardenConfig()
 
 
+@pytest.mark.parametrize("name", ["WARDEN_ENFORCE_WORKSPACE_CONTAINMENT", "WARDEN_REQUIRE_APPROVAL_FOR_DESTRUCTIVE"])
+@pytest.mark.parametrize("value", ["false", "0", "no", "off"])
+def test_safety_controls_cannot_be_disabled(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigError, match="always enforced"):
+        WardenConfig()
+
+
 def test_boolean_defaults_are_secure():
     c = WardenConfig()
     assert c.enforce_workspace_containment is True
