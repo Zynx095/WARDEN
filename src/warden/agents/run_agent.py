@@ -1,167 +1,209 @@
-"""Agentverse and uAgents deployment entry point for WARDEN.
+"""uAgents entry point for WARDEN.
 
-Initializes the uAgents Agent, configures the Agent Chat Protocol (ACP),
-and establishes connectivity with Agentverse Mailbox for ASI:One discovery.
-Enforces strict agent identity configuration with no hardcoded fallback seeds.
+Initializes the uAgents Agent, attaches the Agent Chat Protocol (ACP) and runs it.
+By default the agent runs **local-only**: it binds to the loopback interface, has no
+registered endpoint and makes no Agentverse connection. Mailbox mode is opt-in and
+requires an account-specific provisioning step that this process cannot perform or
+verify on its own (see docs/INTEGRATION.md).
+
+Identity comes only from an explicit seed or ``AGENT_SEED``; there is no fallback.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
 import sys
 from pathlib import Path
 from typing import List, Optional, Union
+
 from uagents import Agent
-from uagents.crypto import Identity
 
 from warden.agents.warden_agent import WardenAgent
+from warden.config import ConfigError, env_bool, load_environment, resolve_repo_path
 from warden.execution.workspace import Workspace
+from warden.identity import AgentIdentityError, derive_agent_address, validate_seed
 from warden.integrations.acp_adapter import create_acp_protocol
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
 logger = logging.getLogger("warden.runner")
 
+LOOPBACK_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
 
-class AgentIdentityError(ValueError):
-    """Raised when agent identity configuration is missing or insecure."""
-    pass
+__all__ = [
+    "AgentIdentityError",
+    "build_warden_agent",
+    "derive_agent_address",
+    "describe_mode",
+    "restrict_bind_host",
+    "main",
+]
 
 
-def derive_agent_address(seed: str) -> str:
-    """Safely derive the Bech32 agent address from a seed phrase without logging the seed."""
-    clean_seed = (seed or "").strip()
-    if not clean_seed:
-        raise AgentIdentityError("Cannot derive address from an empty or missing seed.")
-    identity = Identity.from_seed(clean_seed, 0)
-    return identity.address
+def describe_mode(use_mailbox: bool, endpoint: Optional[Union[str, List[str]]]) -> str:
+    """Name the connectivity mode. This states configuration, not verified connectivity."""
+    if endpoint:
+        return "external-endpoint (configured, registration not verified)"
+    if use_mailbox:
+        return "mailbox (configured, Agentverse provisioning not verified)"
+    return "local-only"
+
+
+def restrict_bind_host(host: str = LOOPBACK_HOST) -> bool:
+    """Make the SDK's embedded HTTP server bind to ``host`` instead of its hardcoded 0.0.0.0.
+
+    uAgents 0.26.1 exposes the bind address only as the module constant ``uagents.asgi.HOST``.
+    Returns True when the restriction was applied; False if the SDK layout differs, in which
+    case the caller must not claim the agent is loopback-only.
+    """
+    try:
+        from uagents import asgi
+    except ImportError:  # pragma: no cover - uagents is a hard dependency
+        return False
+    if not hasattr(asgi, "HOST"):
+        return False
+    asgi.HOST = host
+    return True
+
+
+def _sdk_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("uagents")
+    except Exception:  # pragma: no cover
+        return "unknown"
+
+
+def _ensure_event_loop() -> asyncio.AbstractEventLoop:
+    """Return a fresh loop for the Agent (the SDK's implicit lookup is deprecated on 3.12)."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    return loop
 
 
 def build_warden_agent(
     name: Optional[str] = None,
     seed: Optional[str] = None,
-    port: int = 8000,
+    port: int = DEFAULT_PORT,
     mailbox: bool = False,
     mailbox_key: Optional[str] = None,
     endpoint: Optional[Union[str, List[str]]] = None,
     workspace_dir: Optional[Path | str] = None,
 ) -> Agent:
     """Build and configure a uAgents Agent running WARDEN with native ACP.
-    
-    Security Invariant:
-    - Predictable hardcoded fallback seeds are strictly prohibited.
-    - An explicit seed or AGENT_SEED environment variable is mandatory.
-    - Seeds are never logged or exposed in terminal output.
+
+    Security invariants:
+    - No hardcoded or placeholder seeds; an explicit seed or AGENT_SEED is mandatory.
+    - Seeds and keys are never logged or exposed in terminal output.
+    - This function does not read ``.env``; entry points call ``load_environment`` first.
     """
     agent_name = name or os.getenv("AGENTVERSE_AGENT_NAME", "warden-verification-agent")
-    
-    # 1. Mandatory seed validation
-    agent_seed = (seed or os.getenv("AGENT_SEED") or "").strip()
-    if not agent_seed:
-        raise AgentIdentityError(
-            "Agent seed is not configured. Provide an explicit seed argument or set AGENT_SEED "
-            "in your environment. Fallback to predictable hardcoded seeds is prohibited."
+    agent_seed = validate_seed(seed or os.getenv("AGENT_SEED"))
+
+    use_mailbox = mailbox
+    if (mailbox_key or os.getenv("AGENTVERSE_MAILBOX_KEY") or "").strip():
+        # uAgents 0.26.1 has no mailbox-key parameter: a value here selects mailbox mode only.
+        use_mailbox = True
+        logger.warning(
+            "AGENTVERSE_MAILBOX_KEY is not consumed by uAgents %s; it only selects mailbox mode. "
+            "Mailbox provisioning is done by connecting through the local agent inspector.",
+            _sdk_version(),
         )
 
-    # 2. Mailbox and Agentverse connectivity
-    mb_key = mailbox_key or os.getenv("AGENTVERSE_MAILBOX_KEY")
-    agentverse_config: Optional[str] = None
-    use_mailbox = mailbox
-
-    if mb_key:
-        clean_key = mb_key.strip()
-        if clean_key:
-            agentverse_config = f"{clean_key}@https://agentverse.ai"
-            use_mailbox = True
-
-    # 3. Workspace sandbox configuration
-    ws_path = Path(workspace_dir or os.getenv("WARDEN_WORKSPACE_ROOT", "./temp_workspace")).resolve()
+    ws_path = resolve_repo_path(workspace_dir or os.getenv("WARDEN_WORKSPACE_ROOT") or "./temp_workspace")
     workspace = Workspace(ws_path)
     warden_core = WardenAgent(workspace=workspace)
 
-    # 4. Initialize uAgent with verified identity
     agent = Agent(
         name=agent_name,
         seed=agent_seed,
         port=port,
         endpoint=endpoint,
-        agentverse=agentverse_config,
         mailbox=use_mailbox,
+        loop=_ensure_event_loop(),
     )
-
-    # 5. Attach the official Agent Chat Protocol (v0.3.0)
-    acp_proto = create_acp_protocol(warden=warden_core)
-    agent.include(acp_proto)
+    agent.include(create_acp_protocol(warden=warden_core))
 
     logger.info("=" * 60)
     logger.info("[WARDEN] Autonomous Verification Agent Initialized")
-    logger.info(f"Agent Name:    {agent.name}")
-    logger.info(f"Agent Address: {agent.address}")
-    if agent._use_mailbox:
-        masked_key = f"{mb_key[:4]}...{mb_key[-4:]}" if mb_key and len(mb_key) > 8 else "active"
-        logger.info(f"Mailbox:       Connected to Agentverse (key: {masked_key})")
-    else:
-        logger.info("Mailbox:       Disabled (Local standalone mode)")
-    logger.info(f"Workspace:     {workspace.root_path}")
+    logger.info("Agent Name:    %s", agent.name)
+    logger.info("Agent Address: %s", agent.address)
+    logger.info("Mode:          %s", describe_mode(agent._use_mailbox, endpoint))
+    logger.info("Workspace:     %s", workspace.root_path)
     logger.info("Protocol:      AgentChatProtocol (v0.3.0)")
     logger.info("=" * 60)
-
     return agent
 
 
-def main():
+def main(argv: Optional[List[str]] = None) -> int:
+    loaded = load_environment()
+
     parser = argparse.ArgumentParser(description="Run WARDEN uAgent with Agent Chat Protocol")
     parser.add_argument("--name", type=str, default=None, help="Agent name")
-    parser.add_argument("--seed", type=str, default=None, help="Agent seed phrase (or set AGENT_SEED)")
-    parser.add_argument("--port", type=int, default=8000, help="Local port (default 8000)")
-    parser.add_argument("--mailbox", action="store_true", help="Enable Agentverse mailbox polling")
-    parser.add_argument("--mailbox-key", type=str, default=None, help="Agentverse mailbox API key")
-    parser.add_argument("--endpoint", type=str, default=None, help="Public HTTP endpoint URL")
+    parser.add_argument("--seed", type=str, default=None,
+                        help="Agent seed (discouraged: visible in shell history; prefer AGENT_SEED in .env)")
+    parser.add_argument("--port", type=int, default=None,
+                        help=f"Local port (default WARDEN_AGENT_PORT or {DEFAULT_PORT})")
+    parser.add_argument("--mailbox", action="store_true", help="Opt in to Agentverse mailbox mode")
+    parser.add_argument("--mailbox-key", type=str, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--endpoint", type=str, default=None, help="Public HTTP endpoint URL (external endpoint mode)")
     parser.add_argument("--workspace", type=str, default=None, help="Workspace directory")
-    parser.add_argument(
-        "--show-address",
-        action="store_true",
-        help="Print the derived agent address and exit without starting server",
-    )
-    args = parser.parse_args()
+    parser.add_argument("--bind-all", action="store_true",
+                        help="Bind 0.0.0.0 instead of loopback (needed only behind a proxy/tunnel; exposes the agent)")
+    parser.add_argument("--show-address", action="store_true",
+                        help="Print the derived agent address and exit without starting the server")
+    args = parser.parse_args(argv)
 
-    # If user requests only public address inspection
-    if args.show_address:
-        seed = (args.seed or os.getenv("AGENT_SEED") or "").strip()
-        if not seed:
-            print("Error: Provide --seed or set AGENT_SEED to inspect derived address.", file=sys.stderr)
-            sys.exit(1)
-        addr = derive_agent_address(seed)
-        print(f"Agent Address: {addr}")
-        sys.exit(0)
+    logging.basicConfig(
+        level=getattr(logging, os.getenv("WARDEN_LOG_LEVEL", "INFO").strip().upper(), logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
 
     try:
+        seed = validate_seed(args.seed or os.getenv("AGENT_SEED"))
+        if args.show_address:
+            print(f"Agent Address: {derive_agent_address(seed)}")
+            return 0
+
+        port = args.port or int(os.getenv("WARDEN_AGENT_PORT") or DEFAULT_PORT)
+        use_mailbox = args.mailbox or env_bool("WARDEN_USE_MAILBOX", False)
         agent = build_warden_agent(
             name=args.name,
-            seed=args.seed,
-            port=args.port,
-            mailbox=args.mailbox,
+            seed=seed,
+            port=port,
+            mailbox=use_mailbox,
             mailbox_key=args.mailbox_key,
             endpoint=args.endpoint,
             workspace_dir=args.workspace,
         )
-    except AgentIdentityError as e:
-        print(f"\n[SECURITY CONFIGURATION ERROR] {e}\n", file=sys.stderr)
-        sys.exit(1)
+    except (AgentIdentityError, ConfigError, ValueError) as exc:
+        print(f"\n[CONFIGURATION ERROR] {exc}\n", file=sys.stderr)
+        return 1
 
-    print(f"\n[STARTING] WARDEN Agent is starting on address: {agent.address}")
-    print("To discover this agent in ASI:One (https://asi1.ai):")
-    print("1. Set AGENT_SEED in .env (keep secret, never commit)")
-    print("2. Set AGENTVERSE_MAILBOX_KEY in .env (if connecting via mailbox)")
-    print("3. Register agent on Agentverse (https://agentverse.ai)")
-    print("4. Query agent in ASI:One chat.\n")
+    if args.bind_all:
+        restrict_bind_host("0.0.0.0")
+        bound = f"0.0.0.0:{port} (--bind-all: reachable from the network)"
+    elif restrict_bind_host(LOOPBACK_HOST):
+        bound = f"{LOOPBACK_HOST}:{port} (loopback only)"
+    else:
+        print("[ERROR] Cannot restrict the SDK server to loopback on this uAgents version; "
+              "refusing to start. Pass --bind-all to accept network exposure.", file=sys.stderr)
+        return 1
 
-    agent.run()
+    print(f"\n[STARTING] WARDEN agent {agent.address}")
+    print(f"  Config file: {loaded if loaded else 'none (.env not found; using process environment)'}")
+    print(f"  Mode:        {describe_mode(agent._use_mailbox, args.endpoint)}")
+    print(f"  Listening:   {bound}")
+    print("  Stop with Ctrl+C.\n")
+
+    try:
+        agent.run()
+    except KeyboardInterrupt:
+        print("\n[STOPPED] WARDEN agent shut down.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
