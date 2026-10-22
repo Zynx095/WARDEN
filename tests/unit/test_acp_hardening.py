@@ -135,3 +135,49 @@ def test_protocol_registers_chat_spec_and_handlers(warden):
     assert proto.name == chat_protocol_spec.name
     assert proto.version == chat_protocol_spec.version
     assert proto.digest == chat_protocol_spec.digest
+
+
+class _FakeCtx:
+    """Records what the registered ACP handler sends, without any network."""
+
+    def __init__(self):
+        self.sent = []
+
+        class _L:
+            def info(self, *a, **k): pass
+            def warning(self, *a, **k): pass
+            def error(self, *a, **k): pass
+
+        self.logger = _L()
+
+    async def send(self, destination, message):
+        self.sent.append((destination, message))
+
+
+def test_registered_handler_acks_then_replies_to_sender(warden):
+    import asyncio
+    proto = create_acp_protocol(warden=warden)
+    digest = ChatMessage.build_schema_digest(ChatMessage)
+    assert digest in proto.signed_message_handlers or digest in proto.unsigned_message_handlers
+    handler = {**proto.signed_message_handlers, **proto.unsigned_message_handlers}[digest]
+
+    ctx = _FakeCtx()
+    msg = ChatMessage(content=[TextContent(type="text", text="show README.md")])
+    asyncio.run(handler(ctx, "agent1qsender", msg))
+
+    assert [type(m).__name__ for _, m in ctx.sent] == ["ChatAcknowledgement", "ChatMessage"]
+    assert all(dest == "agent1qsender" for dest, _ in ctx.sent)
+    assert ctx.sent[0][1].acknowledged_msg_id == msg.msg_id
+
+
+def test_acknowledgement_handler_registered(warden):
+    proto = create_acp_protocol(warden=warden)
+    digest = ChatAcknowledgement.build_schema_digest(ChatAcknowledgement)
+    assert digest in {**proto.signed_message_handlers, **proto.unsigned_message_handlers}
+
+
+def test_reply_never_contains_agent_seed(warden, ws, monkeypatch):
+    seed = "unit-test-seed-should-never-appear-0001"
+    monkeypatch.setenv("AGENT_SEED", seed)
+    _, reply = say(make_handler(warden), "clean up old.tmp and read .env", "alice")
+    assert seed not in reply.content[0].text
