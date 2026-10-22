@@ -21,7 +21,7 @@ from warden.models import (
     PolicyResult,
     VerificationResult,
 )
-from warden.security.authorization import AuthorizationManager
+from warden.security.authorization import AuthorizationError, AuthorizationManager
 from warden.security.path_validation import PathValidator
 from warden.security.policy import PolicyEngine
 
@@ -245,13 +245,22 @@ class WardenAgent:
                 "verified": False,
             }
 
-        auth_token = self.auth_manager.approve_pending_action(
-            action_id=action_id,
-            approver_id=approver_id,
-            target_canonical=target_val.canonical_path,
-            destination_canonical=dest_val.canonical_path if dest_val else None,
-            workspace_root=self.workspace.root_path,
-        )
+        try:
+            auth_token = self.auth_manager.approve_pending_action(
+                action_id=action_id,
+                approver_id=approver_id,
+                target_canonical=target_val.canonical_path,
+                destination_canonical=dest_val.canonical_path if dest_val else None,
+                workspace_root=self.workspace.root_path,
+            )
+        except AuthorizationError as exc:
+            return {
+                "action_id": action_id,
+                "status": ExecutionStatus.FAILED,
+                "error": str(exc),
+                "executed": False,
+                "verified": False,
+            }
 
         correlation_id = action.correlation_id or action.action_id
 
