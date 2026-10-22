@@ -2,9 +2,12 @@
 
 Initializes the uAgents Agent, attaches the Agent Chat Protocol (ACP) and runs it.
 By default the agent runs **local-only**: it binds to the loopback interface, has no
-registered endpoint and makes no Agentverse connection. Mailbox mode is opt-in and
-requires an account-specific provisioning step that this process cannot perform or
-verify on its own (see docs/INTEGRATION.md).
+registered endpoint or mailbox, and telemetry reporting is disabled. Note that uAgents
+0.26.1 still sends one signed, best-effort "active" status update (public agent
+identifier only) to the Agentverse Almanac API at startup; that call cannot be disabled
+through the Agent constructor and is not registration or mailbox connectivity. Mailbox
+mode is opt-in and requires an account-specific provisioning step that this process
+cannot perform or verify on its own (see docs/INTEGRATION.md).
 
 Identity comes only from an explicit seed or ``AGENT_SEED``; there is no fallback.
 """
@@ -123,6 +126,8 @@ def build_warden_agent(
         endpoint=endpoint,
         mailbox=use_mailbox,
         loop=_ensure_event_loop(),
+        # Telemetry is only meaningful once registered on Agentverse; keep local mode quiet.
+        report_events=bool(use_mailbox or endpoint),
     )
     agent.include(create_acp_protocol(warden=warden_core))
 

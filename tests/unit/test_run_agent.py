@@ -186,3 +186,14 @@ def test_main_missing_seed_exits_nonzero_without_traceback(tmp_path, monkeypatch
     monkeypatch.delenv("AGENT_SEED", raising=False)
     assert main(["--show-address"]) == 1
     assert "CONFIGURATION ERROR" in capsys.readouterr().err
+
+
+def test_local_mode_disables_telemetry_reporting(tmp_path: Path):
+    agent = build_warden_agent(seed="telemetry_test_seed_0001", workspace_dir=tmp_path / "ws")
+    assert agent._report_events is False
+    assert agent._endpoints == []
+
+
+def test_mailbox_mode_keeps_default_reporting(tmp_path: Path):
+    agent = build_warden_agent(seed="telemetry_test_seed_0002", mailbox=True, workspace_dir=tmp_path / "ws")
+    assert agent._report_events is True
