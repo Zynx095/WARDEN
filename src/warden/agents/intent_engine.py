@@ -46,7 +46,7 @@ class IntentEngine:
     ) -> None:
         # offline=True forces the deterministic parser: no API key is read and no network call is made.
         self.offline = offline
-        self.api_key = None if offline else (api_key or os.getenv("ASI_ONE_API_KEY") or os.getenv("OPENAI_API_KEY"))
+        self.api_key = None if offline else (api_key or os.getenv("ASI_ONE_API_KEY"))
         self.base_url = base_url or os.getenv("ASI_ONE_BASE_URL", "https://api.asi1.ai/v1")
         self.model = model or os.getenv("ASI_ONE_MODEL", "asi1-mini")
         self._client = client
