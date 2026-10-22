@@ -1,5 +1,32 @@
+# Environment and secrets
 .env
+*.env
+!.env.example
+secrets.json
+credentials.json
+production.env
+
+# Virtual environments
 .venv/
+venv/
+ENV/
+
+# Python caches and bytecode
 __pycache__/
-.pytest_cache/
 *.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Operating system and temporary files
+.DS_Store
+Thumbs.db
+*.tmp
+temp_workspace/
