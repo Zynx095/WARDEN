@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-80%20Passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-88%20Passed-success.svg)](tests/)
 [![Protocol](https://img.shields.io/badge/Protocol-AgentChatProtocol%20v0.3.0-purple.svg)](https://uagents.fetch.ai/)
 
 ---
@@ -85,9 +85,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architectural specific
 - **Independent Outcome Auditor (`src/warden/audit/auditor.py`):** Validates actual disk state post-execution; never relies on self-reported tool success flags.
 - **Structured Audit Logging (`src/warden/audit/events.py`):** Multi-state lifecycle tracking (`PROPOSED`, `AUTHORIZED`, `BLOCKED`, `AWAITING_APPROVAL`, `EXECUTED`, `VERIFIED`, `FAILED`).
 - **Adversarial Resilience (`tests/security/test_adversarial.py`):** Tested against prompt injections in reason strings and file contents, forged authorization tokens, and simulated fake execution claims.
-- **Automated Test Suite:** 80 tests collected, 80 passed, 0 failed in ~5 seconds.
+- **Agent Identity Hardening (`src/warden/agents/run_agent.py`):** Mandatory seed configuration; all hardcoded predictable fallback seeds removed. Fail-closed error handling with `AgentIdentityError`. Keystores and private keys strictly excluded from version control.
+- **Automated Test Suite:** 88 tests collected, 88 passed, 0 failed.
 
 ### 🔄 External Deployment Readiness
+- **Agent Seed:** Configure `AGENT_SEED` in `.env` or supply via `--seed`. Inspect derived address with `python src/warden/agents/run_agent.py --show-address`.
 - **Agentverse Mailbox Key:** Set `AGENTVERSE_MAILBOX_KEY` in `.env` to connect to Agentverse without public port forwarding.
 - **ASI:One Discoverability:** With mailbox connected, the agent is registered on the Almanac and discoverable at `https://asi1.ai`.
 
@@ -128,7 +130,11 @@ python -m pytest -v
 
 ### 5.4 Starting the Live WARDEN Agent (uAgents / Agentverse)
 ```bash
-python src/warden/agents/run_agent.py
+# Safely inspect derived address without starting server:
+python src/warden/agents/run_agent.py --seed "your_secure_seed_phrase" --show-address
+
+# Launch agent runner:
+python src/warden/agents/run_agent.py --seed "your_secure_seed_phrase"
 ```
 Starts the agent, prints its unique Fetch.ai address (`agent1q...`), attaches the `AgentChatProtocol`, and begins listening for incoming messages.
 
@@ -138,6 +144,7 @@ Starts the agent, prints its unique Fetch.ai address (`agent1q...`), attaches th
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Architectural specification, trust boundaries, and protocol details.
 - [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) — Threat model, attack vectors, mitigations, and residual risks.
+- [docs/IDENTITY_AND_ENDPOINT_AUDIT.md](docs/IDENTITY_AND_ENDPOINT_AUDIT.md) — Agent identity hardening and endpoint connectivity audit.
 - [docs/REQUIREMENTS_TRACEABILITY.md](docs/REQUIREMENTS_TRACEABILITY.md) — Challenge requirement mapping and verification evidence.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — Developer setup, testing guidelines, and contribution rules.
 - [docs/INITIAL_AUDIT.md](docs/INITIAL_AUDIT.md) — Baseline engineering and security audit findings.
