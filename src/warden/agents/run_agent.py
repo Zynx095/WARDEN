@@ -41,6 +41,7 @@ __all__ = [
     "build_warden_agent",
     "derive_agent_address",
     "describe_mode",
+    "enable_inspector_pna_cors",
     "restrict_bind_host",
     "main",
 ]
@@ -70,6 +71,49 @@ def restrict_bind_host(host: str = LOOPBACK_HOST) -> bool:
         return False
     asgi.HOST = host
     return True
+
+
+def enable_inspector_pna_cors() -> bool:
+    """Ensure the embedded ASGI server sends Access-Control-Allow-Private-Network.
+
+    Modern Chromium browsers enforce Private Network Access (PNA) checks when a public
+    HTTPS site (agentverse.ai) calls loopback (127.0.0.1). Without this header on OPTIONS
+    preflights, the browser blocks the connection before it reaches /agent_info or /connect.
+    """
+    try:
+        from uagents import asgi
+        if getattr(asgi.ASGIServer, "_pna_cors_enabled", False):
+            return True
+
+        async def _pna_serve(self):
+            import contextlib
+            import uvicorn
+            config = uvicorn.Config(
+                self,
+                host=asgi.HOST,
+                port=self._port,
+                log_level="warning",
+                forwarded_allow_ips="*",
+                headers=[
+                    ("Access-Control-Allow-Origin", "*"),
+                    ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"),
+                    ("Access-Control-Allow-Headers", "*"),
+                    ("Access-Control-Allow-Credentials", "false"),
+                    ("Access-Control-Allow-Private-Network", "true"),
+                ],
+            )
+            self._server = uvicorn.Server(config)
+            self._logger.info(
+                f"Starting server on http://{asgi.HOST}:{self._port} (Press CTRL+C to quit)"
+            )
+            with contextlib.suppress(asyncio.CancelledError, KeyboardInterrupt):
+                await self._server.serve()
+
+        asgi.ASGIServer.serve = _pna_serve
+        asgi.ASGIServer._pna_cors_enabled = True
+        return True
+    except Exception:
+        return False
 
 
 def _sdk_version() -> str:
@@ -218,6 +262,8 @@ def main(argv: Optional[List[str]] = None) -> int:
               "refusing to start. Pass --bind-all to accept network exposure.", file=sys.stderr)
         return 1
 
+    enable_inspector_pna_cors()
+
     print(f"\n[STARTING] WARDEN agent {agent.address}")
     print(f"  Config file: {loaded if loaded else 'none (.env not found; using process environment)'}")
     print(f"  Mode:        {describe_mode(agent._use_mailbox, args.endpoint)}")
@@ -228,6 +274,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"  Inspector:   {inspector_url}")
         print("  Note:        If mailbox is not yet provisioned on Agentverse, open the")
         print("               Inspector URL above in your browser to complete connection.")
+        print("  Browser tip: If the Inspector shows 'Check your agent' instructions, your")
+        print("               browser is blocking mixed-content from HTTPS (agentverse.ai)")
+        print("               to local HTTP. In Chrome/Edge: click site settings -> allow")
+        print("               'Insecure content' for agentverse.ai and refresh the page.")
         if not (os.getenv("WARDEN_APPROVER_ADDRESSES") or "").strip():
             print("  Advisory:    WARDEN_APPROVER_ADDRESSES is unset. Requesters will be able")
             print("               to approve their own destructive proposals in public chat.")
