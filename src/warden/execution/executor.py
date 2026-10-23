@@ -52,7 +52,8 @@ class RestrictedExecutor:
             )
 
         # 2. Target path validation
-        target_val = self.path_validator.validate_path(action.target)
+        allow_root = (op == ActionType.READ.value)
+        target_val = self.path_validator.validate_path(action.target, allow_root=allow_root)
         if not target_val.is_safe or not target_val.canonical_path:
             return ExecutionResult(
                 action=action,
@@ -127,6 +128,26 @@ class RestrictedExecutor:
                         success=False,
                         error=f"File not found: {action.target}",
                     )
+                if target_path.is_dir():
+                    try:
+                        filenames = sorted([
+                            f.name for f in target_path.iterdir()
+                            if not f.name.startswith(".git")
+                        ])
+                        output = "\n".join(filenames) if filenames else "(empty directory)"
+                        return ExecutionResult(
+                            action=action,
+                            status=ExecutionStatus.EXECUTED,
+                            success=True,
+                            output=output,
+                        )
+                    except OSError as exc:
+                        return ExecutionResult(
+                            action=action,
+                            status=ExecutionStatus.FAILED,
+                            success=False,
+                            error=f"Directory read error: {exc}",
+                        )
                 if not target_path.is_file():
                     return ExecutionResult(
                         action=action,

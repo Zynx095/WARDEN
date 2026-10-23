@@ -124,3 +124,18 @@ def test_policy_result_context_contains_action_metadata(policy_engine: PolicyEng
     assert res.context.get("action_id") == action.action_id
     assert res.context.get("operation") == "READ"
     assert res.context.get("target") == "config.yaml"
+
+
+def test_read_workspace_root_allowed(policy_engine: PolicyEngine):
+    action = Action(operation="READ", target=".", reason="List workspace contents")
+    res = policy_engine.evaluate(action)
+    assert res.decision == Decision.ALLOW
+    assert res.policy_id == "WDN-000"
+
+
+def test_mutations_on_workspace_root_blocked(policy_engine: PolicyEngine):
+    for op in ("DELETE", "WRITE", "CREATE", "RENAME"):
+        action = Action(operation=op, target=".", destination="new_dir" if op == "RENAME" else None)
+        res = policy_engine.evaluate(action)
+        assert res.decision == Decision.BLOCK
+        assert res.policy_id == "WDN-002"

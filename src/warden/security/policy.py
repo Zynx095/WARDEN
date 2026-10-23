@@ -63,7 +63,8 @@ class PolicyEngine:
             )
 
         # 3. Path safety validation on target
-        target_val = self.path_validator.validate_path(target)
+        allow_root = (operation == ActionType.READ.value)
+        target_val = self.path_validator.validate_path(target, allow_root=allow_root)
         if not target_val.is_safe:
             return PolicyResult(
                 decision=Decision.BLOCK,
