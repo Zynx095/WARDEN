@@ -46,6 +46,8 @@ class WardenACPHandler:
         self.approvers: Set[str] = {a.strip() for a in approvers if a and a.strip()}
         # action_id -> sender that caused the approval request; only that sender may approve it.
         self._approval_owners: Dict[str, str] = {}
+        # Bounded message deduplication cache: msg_id -> (ack, reply)
+        self._processed_messages: Dict[str, Tuple[ChatAcknowledgement, ChatMessage]] = {}
 
     def _scrub(self, text: Any) -> str:
         """Remove local filesystem locations from text sent back to a remote chat peer."""
@@ -60,9 +62,18 @@ class WardenACPHandler:
         msg: ChatMessage,
         sender: str = "asi1_user",
     ) -> Tuple[ChatAcknowledgement, ChatMessage]:
-        """Process an incoming ACP ChatMessage; never raises, always returns an acknowledgement and reply."""
+        """Process an incoming ACP ChatMessage; never raises, always returns an acknowledgement and reply.
+
+        Guarantees idempotent delivery: duplicate messages with identical msg_id return the
+        cached response without re-executing any action or creating duplicate approval proposals.
+        """
+        msg_id_key = str(msg.msg_id) if getattr(msg, "msg_id", None) else None
+        if msg_id_key and msg_id_key in self._processed_messages:
+            logger.info("Duplicate ACP message %s received from %s; returning cached response", msg_id_key, sender)
+            return self._processed_messages[msg_id_key]
+
         try:
-            return self._process_chat_message(msg, sender)
+            ack, reply = self._process_chat_message(msg, sender)
         except Exception as exc:  # fail closed: report a generic error, log only the type
             logger.error("ACP message handling failed: %s", type(exc).__name__)
             ack = ChatAcknowledgement(timestamp=msg.timestamp, acknowledged_msg_id=msg.msg_id)
@@ -70,7 +81,13 @@ class WardenACPHandler:
                 type="text",
                 text="[WARDEN] The request could not be processed safely. No action was taken.",
             )])
-            return ack, reply
+
+        if msg_id_key:
+            if len(self._processed_messages) >= 1000:
+                self._processed_messages.pop(next(iter(self._processed_messages)))
+            self._processed_messages[msg_id_key] = (ack, reply)
+
+        return ack, reply
 
     def _process_chat_message(
         self,
