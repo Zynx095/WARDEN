@@ -118,3 +118,26 @@ def test_offline_engine_ignores_configured_key(monkeypatch):
     monkeypatch.setenv("ASI_ONE_API_KEY", "asi-test-key")
     engine = IntentEngine(offline=True)
     assert engine.api_key is None and engine.client is None
+
+
+def test_deterministic_fallback_list_filenames_in_permitted_workspace():
+    engine = IntentEngine(api_key=None)
+    actions = engine.parse_intent("List the filenames in your permitted workspace")
+    assert len(actions) == 1
+    assert actions[0].operation == "READ"
+    assert actions[0].target == "."
+    assert "directory listing" in actions[0].reason.lower()
+
+
+def test_deterministic_fallback_list_files_variations():
+    engine = IntentEngine(api_key=None)
+    for phrase in [
+        "List files in workspace",
+        "Show filenames",
+        "Directory listing of permitted workspace",
+        "What files are in the workspace?",
+    ]:
+        actions = engine.parse_intent(phrase)
+        assert len(actions) == 1
+        assert actions[0].operation == "READ"
+        assert actions[0].target == "."

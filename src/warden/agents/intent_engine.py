@@ -15,7 +15,7 @@ INTENT_SYSTEM_PROMPT = """You are WARDEN's Intent Interpreter.
 Your job is to analyze the user's intent and translate it into a JSON array of discrete filesystem actions.
 
 Supported operations:
-- READ: inspect file contents
+- READ: inspect file contents or list directory contents (use target "." for workspace root)
 - CREATE: create a new file
 - WRITE: write content to a file
 - DELETE: delete a file
@@ -175,14 +175,22 @@ class IntentEngine:
             )
 
         # Read requests
-        elif "read" in lower or "view" in lower or "inspect" in lower or "show" in lower:
+        elif ("read" in lower or "view" in lower or "inspect" in lower or "show" in lower or "list" in lower or "dir" in lower or "ls" in lower or "filename" in lower or "files" in lower):
             matches = re.findall(r"(?:\.[\w-]+|[\w\.-]+\.[\w-]+)", text)
-            target = matches[0] if matches else "README.md"
+            if matches:
+                target = matches[0]
+                reason = "Rule-based file inspection proposal."
+            elif any(k in lower for k in ("list", "dir", "ls", "filename", "files", "workspace")):
+                target = "."
+                reason = "Rule-based directory listing proposal."
+            else:
+                target = "README.md"
+                reason = "Rule-based file inspection proposal."
             actions.append(
                 Action(
                     operation="READ",
                     target=target,
-                    reason="Rule-based file inspection proposal.",
+                    reason=reason,
                 )
             )
 
