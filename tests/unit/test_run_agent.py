@@ -14,6 +14,7 @@ from warden.agents.run_agent import (
     AgentIdentityError,
     build_warden_agent,
     derive_agent_address,
+    enable_inspector_pna_cors,
     main,
 )
 
@@ -264,3 +265,27 @@ def test_main_mailbox_mode_prints_inspector_and_advisory(tmp_path: Path, monkeyp
     assert "Inspector:" in out
     assert "8008" in out
     assert "WARDEN_APPROVER_ADDRESSES is unset" in out
+    assert "Browser tip:" in out
+
+
+def test_enable_inspector_pna_cors():
+    from uagents import asgi
+    assert enable_inspector_pna_cors() is True
+    assert getattr(asgi.ASGIServer, "_pna_cors_enabled", False) is True
+
+
+def test_endpoint_overrides_and_disables_mailbox_in_sdk(tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    """Verifies that setting endpoint when mailbox=True is passed causes the SDK
+    to disable mailbox mode and unset MailboxClient, proving endpoint should NOT be added.
+    """
+    with caplog.at_level(logging.WARNING):
+        agent = build_warden_agent(
+            seed="endpoint_override_seed_123",
+            workspace_dir=tmp_path / "ws",
+            mailbox=True,
+            endpoint="http://127.0.0.1:8000/submit",
+        )
+    assert agent._use_mailbox is False
+    assert agent._mailbox_client is None
+    assert agent.agent_type == "custom"
+    assert any("Endpoint configuration overrides mailbox setting" in r.message for r in caplog.records)
