@@ -81,12 +81,29 @@ class IntentEngine:
             try:
                 actions = self._call_llm(clean_text, context)
                 if actions:
-                    return actions
+                    return self._deduplicate_actions(actions)
             except Exception as e:
                 logger.warning(f"ASI:One LLM call failed, falling back to deterministic parser: {e}")
 
         # Deterministic fallback parser
-        return self._deterministic_fallback(clean_text, context)
+        actions = self._deterministic_fallback(clean_text, context)
+        return self._deduplicate_actions(actions)
+
+    def _deduplicate_actions(self, actions: List[Action]) -> List[Action]:
+        """Ensure no duplicate proposed actions for identical operation, target, and destination."""
+        deduped: List[Action] = []
+        seen = set()
+        for a in actions:
+            key = (
+                a.operation.upper(),
+                a.target.strip().lower(),
+                (a.destination or "").strip().lower(),
+                a.content or "",
+            )
+            if key not in seen:
+                seen.add(key)
+                deduped.append(a)
+        return deduped
 
     def _call_llm(self, text: str, context: Optional[Dict[str, Any]] = None) -> List[Action]:
         """Call ASI:One chat completions endpoint."""
@@ -153,14 +170,24 @@ class IntentEngine:
                 if ef not in files_to_clean:
                     files_to_clean.append(ef)
 
-            # Also identify temporary or cache files in workspace context
-            if context and "available_files" in context:
-                for f in context["available_files"]:
-                    if f.endswith((".tmp", ".log", ".bak", ".cache")) or "temp" in f or "cache" in f:
-                        if f not in files_to_clean:
-                            files_to_clean.append(f)
-            elif not files_to_clean:
-                files_to_clean.extend(["cache.tmp", "temp.log"])
+            # Discover temporary/cache files in workspace context only when no explicit files
+            # were named or the user explicitly requested a broad/general temporary cleanup
+            user_requested_general_cleanup = (
+                not explicit_files
+                or (
+                    bool(re.search(r"\b(?:all|other|remaining)\b", lower))
+                    and bool(re.search(r"\b(?:temp|temporary|cache|logs?)\b", lower))
+                )
+            )
+
+            if user_requested_general_cleanup:
+                if context and "available_files" in context:
+                    for f in context["available_files"]:
+                        if f.endswith((".tmp", ".log", ".bak", ".cache")) or "temp" in f or "cache" in f:
+                            if f not in files_to_clean:
+                                files_to_clean.append(f)
+                elif not files_to_clean:
+                    files_to_clean.extend(["cache.tmp", "temp.log"])
 
             for f in files_to_clean:
                 actions.append(

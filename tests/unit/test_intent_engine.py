@@ -158,3 +158,43 @@ def test_pure_negative_constraint_proposes_no_action():
     engine = IntentEngine(api_key=None)
     actions = engine.parse_intent("Do not create, modify, rename, or delete anything.")
     assert actions == []
+
+def test_specific_delete_does_not_pollute_from_workspace_context():
+    engine = IntentEngine(api_key=None)
+    context = {"available_files": ["cache.tmp", "debug.log", "production.env"]}
+    actions = engine.parse_intent("Delete cache.tmp", context=context)
+    assert len(actions) == 1
+    assert actions[0].operation == "DELETE"
+    assert actions[0].target == "cache.tmp"
+
+
+def test_specific_delete_with_leading_agent_mention():
+    engine = IntentEngine(api_key=None)
+    context = {"available_files": ["cache.tmp", "debug.log", "production.env"]}
+    prompt = "@agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7 Delete cache.tmp"
+    actions = engine.parse_intent(prompt, context=context)
+    assert len(actions) == 1
+    assert actions[0].operation == "DELETE"
+    assert actions[0].target == "cache.tmp"
+
+
+def test_explicit_multiple_delete_preserved():
+    engine = IntentEngine(api_key=None)
+    context = {"available_files": ["cache.tmp", "debug.log", "production.env"]}
+    actions = engine.parse_intent("Delete cache.tmp and debug.log", context=context)
+    assert len(actions) == 2
+    targets = {a.target for a in actions}
+    assert targets == {"cache.tmp", "debug.log"}
+
+
+def test_action_deduplication():
+    engine = IntentEngine(api_key=None)
+    duplicate_actions = [
+        Action(operation="DELETE", target="cache.tmp"),
+        Action(operation="DELETE", target="cache.tmp"),
+        Action(operation="DELETE", target="debug.log"),
+    ]
+    deduped = engine._deduplicate_actions(duplicate_actions)
+    assert len(deduped) == 2
+    assert [a.target for a in deduped] == ["cache.tmp", "debug.log"]
+
