@@ -11,6 +11,8 @@ from warden.models import Action, ActionType
 
 logger = logging.getLogger(__name__)
 
+FILE_PATTERN = re.compile(r"(?:[a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9_\-]+|(?:\.\./|\./)+[a-zA-Z0-9_\-\./\\]+)")
+
 INTENT_SYSTEM_PROMPT = """You are WARDEN's Intent Interpreter.
 Your job is to analyze the user's intent and translate it into a JSON array of discrete filesystem actions.
 
@@ -135,7 +137,7 @@ class IntentEngine:
         if "clean" in lower or "remove" in lower or "delete" in lower or "purge" in lower:
             files_to_clean: List[str] = []
             # Extract any explicitly named files in user text
-            explicit_files = re.findall(r"(?:\.[\w-]+|[\w\.-]+\.[\w-]+)", text)
+            explicit_files = FILE_PATTERN.findall(text)
             for ef in explicit_files:
                 if ef not in files_to_clean:
                     files_to_clean.append(ef)
@@ -160,7 +162,7 @@ class IntentEngine:
 
         # Create/write requests
         elif "create" in lower or "make" in lower or "write" in lower:
-            matches = re.findall(r"(?:\.[\w-]+|[\w\.-]+\.[\w-]+)", text)
+            matches = FILE_PATTERN.findall(text)
             target = matches[0] if matches else "output.txt"
             content_match = re.search(r"with (?:content|text) ['\"](.*?)['\"]", text)
             content = content_match.group(1) if content_match else "Default generated content."
@@ -176,7 +178,7 @@ class IntentEngine:
 
         # Read requests
         elif ("read" in lower or "view" in lower or "inspect" in lower or "show" in lower or "list" in lower or "dir" in lower or "ls" in lower or "filename" in lower or "files" in lower):
-            matches = re.findall(r"(?:\.[\w-]+|[\w\.-]+\.[\w-]+)", text)
+            matches = FILE_PATTERN.findall(text)
             if matches:
                 target = matches[0]
                 reason = "Rule-based file inspection proposal."
