@@ -141,3 +141,20 @@ def test_deterministic_fallback_list_files_variations():
         assert len(actions) == 1
         assert actions[0].operation == "READ"
         assert actions[0].target == "."
+
+def test_intent_with_agent_mention_and_negative_constraints():
+    engine = IntentEngine(api_key=None)
+    prompt = (
+        "@agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7 "
+        "List the filenames in your permitted workspace. Do not create, modify, rename, or delete anything."
+    )
+    actions = engine.parse_intent(prompt)
+    assert len(actions) == 1
+    assert actions[0].operation == "READ"
+    assert actions[0].target == "."
+
+
+def test_pure_negative_constraint_proposes_no_action():
+    engine = IntentEngine(api_key=None)
+    actions = engine.parse_intent("Do not create, modify, rename, or delete anything.")
+    assert actions == []

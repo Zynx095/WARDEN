@@ -74,17 +74,19 @@ class IntentEngine:
         if not text or not text.strip():
             return []
 
+        clean_text = re.sub(r"^\s*@\S+\s*", "", text)
+
         # Attempt ASI:One LLM parsing if configured
         if self.client:
             try:
-                actions = self._call_llm(text, context)
+                actions = self._call_llm(clean_text, context)
                 if actions:
                     return actions
             except Exception as e:
                 logger.warning(f"ASI:One LLM call failed, falling back to deterministic parser: {e}")
 
         # Deterministic fallback parser
-        return self._deterministic_fallback(text, context)
+        return self._deterministic_fallback(clean_text, context)
 
     def _call_llm(self, text: str, context: Optional[Dict[str, Any]] = None) -> List[Action]:
         """Call ASI:One chat completions endpoint."""
@@ -130,14 +132,23 @@ class IntentEngine:
         self, text: str, context: Optional[Dict[str, Any]] = None
     ) -> List[Action]:
         """Rule-based parser for offline execution and automated tests."""
-        lower = text.lower()
+        clean_text = re.sub(r"^\s*@\S+\s*", "", text)
+        has_negative = bool(re.search(r"\b(?:do\s+not|don[\'\u2019]t|never|without|avoid)\b", clean_text, re.IGNORECASE))
+        actionable_text = re.sub(
+            r"\b(?:do\s+not|don[\'\u2019]t|never|without|avoid)\b.*?(?:[;!?]|\.(?:\s|$)|$)",
+            "",
+            clean_text,
+            flags=re.IGNORECASE,
+        ).strip()
+        eval_text = actionable_text if (actionable_text or not has_negative) else ""
+        lower = eval_text.lower()
         actions: List[Action] = []
 
         # Cleanup requests
         if "clean" in lower or "remove" in lower or "delete" in lower or "purge" in lower:
             files_to_clean: List[str] = []
             # Extract any explicitly named files in user text
-            explicit_files = FILE_PATTERN.findall(text)
+            explicit_files = FILE_PATTERN.findall(eval_text)
             for ef in explicit_files:
                 if ef not in files_to_clean:
                     files_to_clean.append(ef)
@@ -162,9 +173,9 @@ class IntentEngine:
 
         # Create/write requests
         elif "create" in lower or "make" in lower or "write" in lower:
-            matches = FILE_PATTERN.findall(text)
+            matches = FILE_PATTERN.findall(eval_text)
             target = matches[0] if matches else "output.txt"
-            content_match = re.search(r"with (?:content|text) ['\"](.*?)['\"]", text)
+            content_match = re.search(r"with (?:content|text) ['\"](.*?)['\"]", eval_text)
             content = content_match.group(1) if content_match else "Default generated content."
             op = "WRITE" if "write" in lower else "CREATE"
             actions.append(
@@ -178,7 +189,7 @@ class IntentEngine:
 
         # Read requests
         elif ("read" in lower or "view" in lower or "inspect" in lower or "show" in lower or "list" in lower or "dir" in lower or "ls" in lower or "filename" in lower or "files" in lower):
-            matches = FILE_PATTERN.findall(text)
+            matches = FILE_PATTERN.findall(eval_text)
             if matches:
                 target = matches[0]
                 reason = "Rule-based file inspection proposal."
