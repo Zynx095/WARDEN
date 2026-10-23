@@ -11,7 +11,7 @@ from warden.models import Action, ActionType
 
 logger = logging.getLogger(__name__)
 
-FILE_PATTERN = re.compile(r"(?:[a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9_\-]+|(?:\.\./|\./)+[a-zA-Z0-9_\-\./\\]+)")
+FILE_PATTERN = re.compile(r"(?:(?:\.\./|\./)+[\w\.-]+(?:/[\w\.-]+)*|[\w\.-]+(?:/[\w\.-]+)*\.[a-zA-Z0-9_-]+|\.[\w-]+)")
 
 INTENT_SYSTEM_PROMPT = """You are WARDEN's Intent Interpreter.
 Your job is to analyze the user's intent and translate it into a JSON array of discrete filesystem actions.
