@@ -56,12 +56,14 @@ class OutcomeAuditor:
             "target_sha256": None,
         }
 
-        target_val = self.path_validator.validate_path(action.target)
+        allow_root = (action.operation.upper() == ActionType.READ.value)
+        target_val = self.path_validator.validate_path(action.target, allow_root=allow_root)
         if target_val.is_safe and target_val.canonical_path:
             p = target_val.canonical_path
             if p.exists():
                 state["target_exists"] = True
                 state["target_is_file"] = p.is_file()
+                state["target_is_dir"] = p.is_dir()
                 if p.is_file():
                     state["target_size"] = p.stat().st_size
                     state["target_sha256"] = _compute_sha256(p)
@@ -94,7 +96,8 @@ class OutcomeAuditor:
                 details=f"Execution failed; no successful modification to verify: {exec_result.error}",
             )
 
-        target_val = self.path_validator.validate_path(action.target)
+        allow_root = (op == ActionType.READ.value)
+        target_val = self.path_validator.validate_path(action.target, allow_root=allow_root)
         if not target_val.is_safe or not target_val.canonical_path:
             return VerificationResult(
                 action=action,
@@ -118,12 +121,20 @@ class OutcomeAuditor:
                     observed_state=observed,
                     details="Verified failure: read target does not exist.",
                 )
+            is_dir = target_path.is_dir()
+            observed["target_is_dir"] = is_dir
+            observed["target_is_file"] = target_path.is_file()
+            details = (
+                "Read verified: target directory exists and was accessible."
+                if is_dir
+                else "Read verified: target file exists and was accessible."
+            )
             return VerificationResult(
                 action=action,
                 status=ExecutionStatus.VERIFIED,
                 verified=True,
                 observed_state=observed,
-                details="Read verified: target file exists and was accessible.",
+                details=details,
             )
 
         elif op in {ActionType.CREATE.value, ActionType.WRITE.value}:

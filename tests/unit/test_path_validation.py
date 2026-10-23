@@ -122,3 +122,29 @@ def test_symlink_breakout_blocked_if_supported(workspace_dir: Path, tmp_path: Pa
     res = validator.validate_path("symlink_escape")
     assert res.is_safe is False
     assert res.policy_id == "WDN-002"
+
+
+def test_root_path_validation(workspace_dir: Path):
+    validator = PathValidator(workspace_dir)
+
+    # By default, allow_root is False
+    res_disallowed = validator.validate_path(".")
+    assert res_disallowed.is_safe is False
+    assert res_disallowed.policy_id == "WDN-002"
+    assert "Direct operations on the workspace root itself are prohibited" in (res_disallowed.error_reason or "")
+
+    # When allow_root is True
+    res_allowed = validator.validate_path(".", allow_root=True)
+    assert res_allowed.is_safe is True
+    assert res_allowed.canonical_path == workspace_dir.resolve()
+    assert res_allowed.relative_path == "."
+
+    # Root with trailing slash
+    res_slash = validator.validate_path("./", allow_root=True)
+    assert res_slash.is_safe is True
+    assert res_slash.canonical_path == workspace_dir.resolve()
+
+    # Traversal still strictly blocked even if allow_root=True
+    res_traversal = validator.validate_path("..", allow_root=True)
+    assert res_traversal.is_safe is False
+    assert res_traversal.policy_id == "WDN-002"

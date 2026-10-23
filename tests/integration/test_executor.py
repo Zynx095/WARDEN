@@ -68,6 +68,22 @@ def test_authorized_create_and_read(
     assert res_read.success is True
     assert res_read.output == "Hello, WARDEN!"
 
+    # Now read the workspace root directory
+    sandbox_workspace.create_synthetic_file("another.log", "data")
+    action_read_dir = Action(operation="READ", target=".")
+    token_read_dir = auth_mgr.issue_token(
+        action=action_read_dir,
+        target_canonical=sandbox_workspace.root_path,
+        destination_canonical=None,
+        workspace_root=sandbox_workspace.root_path,
+        policy_id="WDN-000",
+    )
+    res_dir = executor.execute(ExecutionRequest(action=action_read_dir, authorization=token_read_dir))
+    assert res_dir.status == ExecutionStatus.EXECUTED
+    assert res_dir.success is True
+    assert "another.log" in res_dir.output
+    assert "hello.txt" in res_dir.output
+
 
 def test_authorized_write_modifies_file(
     executor: RestrictedExecutor,

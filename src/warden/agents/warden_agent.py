@@ -131,7 +131,8 @@ class WardenAgent:
             }
 
         # Step 3: Authorization Grant
-        target_val = self.path_validator.validate_path(action.target)
+        allow_root = (action.operation.upper() == ActionType.READ.value)
+        target_val = self.path_validator.validate_path(action.target, allow_root=allow_root)
         dest_val = self.path_validator.validate_path(action.destination) if action.destination else None
 
         assert target_val.canonical_path is not None
@@ -234,7 +235,8 @@ class WardenAgent:
             }
 
         action = pending.action
-        target_val = self.path_validator.validate_path(action.target)
+        allow_root = (action.operation.upper() == ActionType.READ.value)
+        target_val = self.path_validator.validate_path(action.target, allow_root=allow_root)
         dest_val = self.path_validator.validate_path(action.destination) if action.destination else None
 
         if not target_val.is_safe or not target_val.canonical_path:

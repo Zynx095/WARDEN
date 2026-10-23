@@ -108,6 +108,26 @@ class PathValidator:
                 policy_id="WDN-002",
             )
 
+        # Root reference handling ("." or "./")
+        if normalized_str.strip() in {".", "./"}:
+            if not allow_root:
+                return PathValidationResult(
+                    is_safe=False,
+                    error_reason="Direct operations on the workspace root itself are prohibited.",
+                    policy_id="WDN-002",
+                )
+            if must_exist and not self.workspace_root.exists():
+                return PathValidationResult(
+                    is_safe=False,
+                    error_reason="Target resource does not exist.",
+                    policy_id="WDN-005",
+                )
+            return PathValidationResult(
+                is_safe=True,
+                canonical_path=self.workspace_root,
+                relative_path=".",
+            )
+
         # 5. Check lexical directory traversal components
         parts = normalized_str.split("/")
         for part in parts:
