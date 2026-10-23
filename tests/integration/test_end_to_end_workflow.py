@@ -160,3 +160,37 @@ def test_read_workspace_filenames_and_content_end_to_end(disposable_workspace: W
     _, escape_reply = acp_handler.process_chat_message(escape_msg, sender="adversary")
     assert "[BLOCKED]" in escape_reply.content[0].text
     assert "WDN-002" in escape_reply.content[0].text
+
+def test_exact_live_agentverse_chat_input_reproduction(disposable_workspace: Workspace):
+    """Regression test for the exact live message format reported in Agentverse chat."""
+    warden = WardenAgent(workspace=disposable_workspace)
+    acp_handler = WardenACPHandler(
+        warden=warden,
+        intent_engine=IntentEngine(api_key=None),
+    )
+
+    exact_live_prompt = (
+        "@agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7 "
+        "List the filenames in your permitted workspace. Do not create, modify, rename, or delete anything."
+    )
+    inbound_acp_msg = ChatMessage(content=[TextContent(type="text", text=exact_live_prompt)])
+
+    ack, reply = acp_handler.process_chat_message(inbound_acp_msg, sender="live_agentverse_peer")
+
+    assert isinstance(ack, ChatAcknowledgement)
+    assert ack.acknowledged_msg_id == inbound_acp_msg.msg_id
+
+    reply_text = reply.content[0].text
+    assert "[VERIFIED]" in reply_text
+    assert "README.md" in reply_text
+    assert "cache.tmp" in reply_text
+    assert "debug.log" in reply_text
+    assert "production.env" in reply_text
+    assert "- **Output:**" in reply_text
+    assert "No filesystem mutations or tool operations were proposed" not in reply_text
+
+    # Ground truth: no files were deleted, created, or modified
+    assert disposable_workspace.exists("production.env") is True
+    assert disposable_workspace.exists("README.md") is True
+    assert disposable_workspace.exists("cache.tmp") is True
+    assert disposable_workspace.exists("debug.log") is True

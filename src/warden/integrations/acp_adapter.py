@@ -107,7 +107,8 @@ class WardenACPHandler:
             return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
 
         # 3. Check for human approval command in conversation: "APPROVE <action_id>"
-        approval_match = re.search(r"^\s*APPROVE\s+([a-f0-9\-]+)", user_text, re.IGNORECASE)
+        clean_user_text = re.sub(r"^\s*@\S+\s*", "", user_text)
+        approval_match = re.search(r"^\s*APPROVE\s+([a-f0-9\-]+)", clean_user_text, re.IGNORECASE)
         if approval_match:
             action_id = approval_match.group(1).strip()
             owner = self._approval_owners.get(action_id)
