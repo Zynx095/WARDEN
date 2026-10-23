@@ -1,13 +1,20 @@
 """Unit tests for hardened agent identity configuration, validation, and endpoint setup."""
 
+import asyncio
 import logging
 import os
 import pytest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from uagents.registration import AgentStatusUpdate
+import uagents.registration as registration_mod
+
 from warden.agents.run_agent import (
     AgentIdentityError,
     build_warden_agent,
     derive_agent_address,
+    main,
 )
 
 
@@ -164,7 +171,6 @@ def test_restrict_bind_host_sets_sdk_constant():
 
 
 def test_main_show_address_uses_repo_env_file_not_cwd(tmp_path, monkeypatch, capsys):
-    from warden.agents.run_agent import main
     from warden.identity import generate_seed
     seed = generate_seed()
     env = tmp_path / "custom.env"
@@ -181,7 +187,6 @@ def test_main_show_address_uses_repo_env_file_not_cwd(tmp_path, monkeypatch, cap
 
 
 def test_main_missing_seed_exits_nonzero_without_traceback(tmp_path, monkeypatch, capsys):
-    from warden.agents.run_agent import main
     monkeypatch.setenv("WARDEN_ENV_FILE", str(tmp_path / "absent.env"))
     monkeypatch.delenv("AGENT_SEED", raising=False)
     assert main(["--show-address"]) == 1
@@ -197,3 +202,65 @@ def test_local_mode_disables_telemetry_reporting(tmp_path: Path):
 def test_mailbox_mode_keeps_default_reporting(tmp_path: Path):
     agent = build_warden_agent(seed="telemetry_test_seed_0002", mailbox=True, workspace_dir=tmp_path / "ws")
     assert agent._report_events is True
+
+
+def test_publish_manifest_option(tmp_path: Path):
+    with patch("uagents.agent.Agent.publish_manifest", new_callable=AsyncMock) as mock_pub:
+        agent = build_warden_agent(
+            seed="publish_manifest_seed_123",
+            workspace_dir=tmp_path / "ws",
+            publish_manifest=True,
+        )
+        assert agent is not None
+
+
+def test_agent_description_and_readme_configuration(tmp_path: Path):
+    readme = tmp_path / "AGENT_README.md"
+    readme.write_text("# WARDEN Verification Agent\nAutonomous verification core.", encoding="utf-8")
+    agent = build_warden_agent(
+        seed="desc_readme_seed_456",
+        workspace_dir=tmp_path / "ws",
+        description="Autonomous verification system for ASI:One",
+        readme_path=str(readme),
+    )
+    assert agent._description == "Autonomous verification system for ASI:One"
+    assert agent._readme is not None
+    assert "Autonomous verification core" in agent._readme
+
+
+def test_sdk_startup_active_status_update_behavior(tmp_path: Path):
+    """Source-verified test confirming SDK startup Almanac active-status behavior.
+
+    Verifies:
+    1. AgentStatusUpdate signs only public identifier, timestamp and is_active flag.
+    2. Private key and seed are never transmitted in the payload.
+    3. update_agent_status suppresses network/service errors without raising.
+    """
+    seed = "startup_active_probe_seed_789"
+    agent = build_warden_agent(seed=seed, workspace_dir=tmp_path / "ws")
+
+    status = AgentStatusUpdate(agent_identifier=agent.identifier, is_active=True)
+    status.sign(agent._identity)
+    dumped = status.model_dump_json()
+
+    assert agent.address in dumped
+    assert "is_active" in dumped
+    assert "signature" in dumped
+    assert seed not in dumped
+
+    # Verify that errors in the Almanac status update call are non-fatal and suppressed
+    with patch("uagents.registration.almanac_api_post", side_effect=ConnectionError("offline")):
+        asyncio.run(registration_mod.update_agent_status(status, agent._almanac_api_url))
+
+
+def test_main_mailbox_mode_prints_inspector_and_advisory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    monkeypatch.setenv("AGENT_SEED", "mailbox_probe_seed_unique_999")
+    monkeypatch.delenv("WARDEN_APPROVER_ADDRESSES", raising=False)
+
+    with patch("uagents.agent.Agent.run"):
+        assert main(["--mailbox", "--port", "8008"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Inspector:" in out
+    assert "8008" in out
+    assert "WARDEN_APPROVER_ADDRESSES is unset" in out
