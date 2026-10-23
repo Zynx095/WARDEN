@@ -14,7 +14,7 @@ Verifies:
 import re
 import pytest
 from pathlib import Path
-from uagents_core.contrib.protocols.chat import ChatMessage, TextContent
+from uagents_core.contrib.protocols.chat import ChatAcknowledgement, ChatMessage, TextContent
 from warden.agents.intent_engine import IntentEngine
 from warden.agents.warden_agent import WardenAgent
 from warden.execution.workspace import Workspace
@@ -112,3 +112,51 @@ def test_primary_cleanup_workflow_end_to_end(disposable_workspace: Workspace):
     for be in blocked_events:
         assert be.target in {".env", "production.env"}
         assert be.policy_id == "WDN-003"
+
+
+def test_read_workspace_filenames_and_content_end_to_end(disposable_workspace: Workspace):
+    warden = WardenAgent(workspace=disposable_workspace)
+    acp_handler = WardenACPHandler(
+        warden=warden,
+        intent_engine=IntentEngine(api_key=None),
+    )
+
+    # 1. Incoming harmless ACP message requesting workspace filenames listing
+    list_prompt = "List the filenames in your permitted workspace"
+    inbound_acp_msg = ChatMessage(content=[TextContent(type="text", text=list_prompt)])
+
+    ack, acp_reply = acp_handler.process_chat_message(inbound_acp_msg, sender="asi1_chat_user")
+
+    # Trace 1: ChatAcknowledgement returned
+    assert isinstance(ack, ChatAcknowledgement)
+    assert ack.acknowledged_msg_id == inbound_acp_msg.msg_id
+
+    # Trace 6: Result returned to the chat containing actual filenames
+    reply_text = acp_reply.content[0].text
+    assert "[VERIFIED]" in reply_text
+    assert "README.md" in reply_text
+    assert "cache.tmp" in reply_text
+    assert "debug.log" in reply_text
+    assert "production.env" in reply_text
+    assert "- **Output:**" in reply_text
+
+    # Verify audit log recorded complete trace: PROPOSED -> AUTHORIZED -> VERIFIED
+    events = [e for e in warden.audit_logger.get_events() if e.operation == "READ" and e.target == "."]
+    assert len(events) >= 3
+    event_statuses = {e.execution_status for e in events}
+    assert ExecutionStatus.PROPOSED in event_statuses
+    assert ExecutionStatus.AUTHORIZED in event_statuses
+    assert ExecutionStatus.VERIFIED in event_statuses
+
+    # 2. Reading a specific file returns its actual contents
+    read_file_msg = ChatMessage(content=[TextContent(type="text", text="Read README.md")])
+    _, read_file_reply = acp_handler.process_chat_message(read_file_msg, sender="asi1_chat_user")
+    assert "[VERIFIED]" in read_file_reply.content[0].text
+    assert "# Project Documentation" in read_file_reply.content[0].text
+    assert "Preserve this file." in read_file_reply.content[0].text
+
+    # 3. Path traversal read is blocked by policy engine
+    escape_msg = ChatMessage(content=[TextContent(type="text", text="Read ../../outside.txt")])
+    _, escape_reply = acp_handler.process_chat_message(escape_msg, sender="adversary")
+    assert "[BLOCKED]" in escape_reply.content[0].text
+    assert "WDN-002" in escape_reply.content[0].text
