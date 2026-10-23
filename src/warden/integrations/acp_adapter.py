@@ -189,11 +189,18 @@ class WardenACPHandler:
             action_id = r.get("action_id", "unknown")
 
             if status == ExecutionStatus.VERIFIED:
-                lines.append(
-                    f"**{idx}. [VERIFIED]** Action `{action_id[:8]}`\n"
-                    f"   - **Result:** Successfully executed and ground-truth verified.\n"
-                    f"   - **Details:** {r.get('verification_details')}"
-                )
+                line_parts = [
+                    f"**{idx}. [VERIFIED]** Action `{action_id[:8]}`",
+                    f"   - **Result:** Successfully executed and ground-truth verified.",
+                    f"   - **Details:** {r.get('verification_details')}",
+                ]
+                output = r.get("output")
+                if output is not None and str(output).strip() != "":
+                    if "\n" in str(output):
+                        line_parts.append(f"   - **Output:**\n{output}")
+                    else:
+                        line_parts.append(f"   - **Output:** {output}")
+                lines.append("\n".join(line_parts))
             elif status == ExecutionStatus.BLOCKED:
                 lines.append(
                     f"**{idx}. [BLOCKED]** Action `{action_id[:8]}`\n"

@@ -98,3 +98,36 @@ def test_prohibited_operation_blocked_via_acp(acp_handler: WardenACPHandler):
     assert "[BLOCKED]" in reply_text
     assert "WDN-003" in reply_text
     assert "Protected resource modification is prohibited" in reply_text
+
+
+def test_list_filenames_via_acp(acp_handler: WardenACPHandler, acp_workspace: Workspace):
+    acp_workspace.create_synthetic_file("alpha.txt", "Alpha content")
+    acp_workspace.create_synthetic_file("beta.log", "Beta log entry")
+
+    user_text = "List the filenames in your permitted workspace"
+    in_msg = ChatMessage(content=[TextContent(type="text", text=user_text)])
+
+    ack, reply = acp_handler.process_chat_message(in_msg, sender="asi1_user")
+
+    assert isinstance(ack, ChatAcknowledgement)
+    assert ack.acknowledged_msg_id == in_msg.msg_id
+
+    reply_text = reply.content[0].text
+    assert "[VERIFIED]" in reply_text
+    assert "alpha.txt" in reply_text
+    assert "beta.log" in reply_text
+    assert "Output:" in reply_text
+
+
+def test_read_file_content_via_acp(acp_handler: WardenACPHandler, acp_workspace: Workspace):
+    acp_workspace.create_synthetic_file("README.md", "Project documentation content.")
+
+    user_text = "Read README.md"
+    in_msg = ChatMessage(content=[TextContent(type="text", text=user_text)])
+
+    ack, reply = acp_handler.process_chat_message(in_msg, sender="asi1_user")
+
+    assert ack.acknowledged_msg_id == in_msg.msg_id
+    reply_text = reply.content[0].text
+    assert "[VERIFIED]" in reply_text
+    assert "Project documentation content." in reply_text
