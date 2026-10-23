@@ -17,7 +17,8 @@ def isolated_env(monkeypatch, tmp_path):
     """Private copy of os.environ so load_dotenv inside the doctor cannot leak into other tests."""
     monkeypatch.setattr(os, "environ", dict(os.environ))
     for n in ("AGENT_SEED", "WARDEN_SECRET_KEY", "WARDEN_LOG_LEVEL", "WARDEN_AGENT_PORT",
-              "WARDEN_REQUIRE_APPROVAL_FOR_DESTRUCTIVE", "WARDEN_USE_MAILBOX", "AGENTVERSE_MAILBOX_KEY"):
+              "WARDEN_REQUIRE_APPROVAL_FOR_DESTRUCTIVE", "WARDEN_USE_MAILBOX", "AGENTVERSE_MAILBOX_KEY",
+              "WARDEN_APPROVER_ADDRESSES", "AGENTVERSE_PUBLISH_MANIFEST"):
         os.environ.pop(n, None)
     os.environ["WARDEN_ENV_FILE"] = str(tmp_path / "absent.env")
     os.environ["WARDEN_WORKSPACE_ROOT"] = str(tmp_path / "ws")
@@ -82,6 +83,28 @@ def test_integration_readiness_never_claims_connectivity(isolated_env):
     os.environ["WARDEN_USE_MAILBOX"] = "true"
     c = by_name(doctor.check_integration_readiness(), "Agentverse mailbox")
     assert "NOT verified" in c.detail
+
+
+def test_doctor_approver_addresses_advisory_when_mailbox_enabled(isolated_env):
+    os.environ["WARDEN_USE_MAILBOX"] = "true"
+    os.environ.pop("WARDEN_APPROVER_ADDRESSES", None)
+    c = by_name(doctor.check_integration_readiness(), "Public approvers")
+    assert c.status == doctor.WARN
+
+    os.environ["WARDEN_APPROVER_ADDRESSES"] = "agent1qop1,agent1qop2"
+    c2 = by_name(doctor.check_integration_readiness(), "Public approvers")
+    assert c2.status == doctor.PASS
+    assert "2 authorized address(es)" in c2.detail
+
+
+def test_doctor_manifest_publishing_check(isolated_env):
+    os.environ.pop("AGENTVERSE_PUBLISH_MANIFEST", None)
+    c = by_name(doctor.check_integration_readiness(), "Protocol manifest")
+    assert c.status == doctor.WARN
+
+    os.environ["AGENTVERSE_PUBLISH_MANIFEST"] = "true"
+    c2 = by_name(doctor.check_integration_readiness(), "Protocol manifest")
+    assert c2.status == doctor.PASS
 
 
 def test_run_doctor_exit_code_and_output_are_secret_free(isolated_env, monkeypatch):
