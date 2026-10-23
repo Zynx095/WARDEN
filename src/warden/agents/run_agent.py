@@ -19,6 +19,7 @@ import asyncio
 import logging
 import os
 import sys
+import urllib.parse
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -94,6 +95,9 @@ def build_warden_agent(
     mailbox_key: Optional[str] = None,
     endpoint: Optional[Union[str, List[str]]] = None,
     workspace_dir: Optional[Path | str] = None,
+    publish_manifest: bool = False,
+    description: Optional[str] = None,
+    readme_path: Optional[str] = None,
 ) -> Agent:
     """Build and configure a uAgents Agent running WARDEN with native ACP.
 
@@ -115,6 +119,9 @@ def build_warden_agent(
             _sdk_version(),
         )
 
+    agent_desc = description if description is not None else os.getenv("AGENTVERSE_DESCRIPTION")
+    agent_readme = readme_path if readme_path is not None else os.getenv("AGENTVERSE_README_PATH")
+
     ws_path = resolve_repo_path(workspace_dir or os.getenv("WARDEN_WORKSPACE_ROOT") or "./temp_workspace")
     workspace = Workspace(ws_path)
     warden_core = WardenAgent(workspace=workspace, audit_log_file=get_config().audit_log)
@@ -128,8 +135,10 @@ def build_warden_agent(
         loop=_ensure_event_loop(),
         # Telemetry is only meaningful once registered on Agentverse; keep local mode quiet.
         report_events=bool(use_mailbox or endpoint),
+        description=agent_desc,
+        readme_path=agent_readme,
     )
-    agent.include(create_acp_protocol(warden=warden_core))
+    agent.include(create_acp_protocol(warden=warden_core), publish_manifest=publish_manifest)
 
     logger.info("=" * 60)
     logger.info("[WARDEN] Autonomous Verification Agent Initialized")
@@ -138,6 +147,8 @@ def build_warden_agent(
     logger.info("Mode:          %s", describe_mode(agent._use_mailbox, endpoint))
     logger.info("Workspace:     %s", workspace.root_path)
     logger.info("Protocol:      AgentChatProtocol (v0.3.0)")
+    if publish_manifest:
+        logger.info("Manifest:      Protocol manifest publication enabled")
     logger.info("=" * 60)
     return agent
 
@@ -159,6 +170,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Bind 0.0.0.0 instead of loopback (needed only behind a proxy/tunnel; exposes the agent)")
     parser.add_argument("--show-address", action="store_true",
                         help="Print the derived agent address and exit without starting the server")
+    parser.add_argument("--publish-manifest", action="store_true",
+                        help="Publish the Agent Chat Protocol manifest to Almanac on startup (for discovery)")
+    parser.add_argument("--description", type=str, default=None,
+                        help="Agent description for Agentverse profile")
+    parser.add_argument("--readme", type=str, default=None,
+                        help="Path to README file for Agentverse profile")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -174,6 +191,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         port = args.port or int(os.getenv("WARDEN_AGENT_PORT") or DEFAULT_PORT)
         use_mailbox = args.mailbox or env_bool("WARDEN_USE_MAILBOX", False)
+        publish_manifest = args.publish_manifest or env_bool("AGENTVERSE_PUBLISH_MANIFEST", False)
         agent = build_warden_agent(
             name=args.name,
             seed=seed,
@@ -182,6 +200,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             mailbox_key=args.mailbox_key,
             endpoint=args.endpoint,
             workspace_dir=args.workspace,
+            publish_manifest=publish_manifest,
+            description=args.description,
+            readme_path=args.readme,
         )
     except (AgentIdentityError, ConfigError, ValueError) as exc:
         print(f"\n[CONFIGURATION ERROR] {exc}\n", file=sys.stderr)
@@ -201,6 +222,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"  Config file: {loaded if loaded else 'none (.env not found; using process environment)'}")
     print(f"  Mode:        {describe_mode(agent._use_mailbox, args.endpoint)}")
     print(f"  Listening:   {bound}")
+    if agent._use_mailbox:
+        escaped_uri = urllib.parse.quote(f"http://127.0.0.1:{port}")
+        inspector_url = f"{agent._agentverse.url}/inspect/?uri={escaped_uri}&address={agent.address}"
+        print(f"  Inspector:   {inspector_url}")
+        print("  Note:        If mailbox is not yet provisioned on Agentverse, open the")
+        print("               Inspector URL above in your browser to complete connection.")
+        if not (os.getenv("WARDEN_APPROVER_ADDRESSES") or "").strip():
+            print("  Advisory:    WARDEN_APPROVER_ADDRESSES is unset. Requesters will be able")
+            print("               to approve their own destructive proposals in public chat.")
+    if publish_manifest:
+        print("  Manifest:    Publishing protocol manifest to Almanac API on startup")
     print("  Stop with Ctrl+C.\n")
 
     try:
