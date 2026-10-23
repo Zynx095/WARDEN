@@ -57,7 +57,8 @@ exercised in tests with mocked contexts, not against a live peer.
   - Network failure / offline: SDK logs `EXCEPTION: Failed to update agent registration status: ...` (non-fatal)
 
 ### 2.3 Mailbox Architecture and Provisioning
-* `Agent(mailbox=True)` sets the agent's target endpoint to `agentverse.mailbox_endpoint` (`https://agentverse.ai/v1/submit`) and instantiates a `MailboxClient`.
+* `Agent(mailbox=True)` sets the agent's target endpoint to `agentverse.mailbox_endpoint` (`https://agentverse.ai/v2/agents/mailbox/submit`) and instantiates a `MailboxClient`.
+* **No `endpoint` with `mailbox=True`:** In `uagents 0.26.1`, setting `endpoint` (e.g. `endpoint="http://127.0.0.1:8000/submit"`) overrides and **disables** mailbox mode, setting `_use_mailbox = False` and `_mailbox_client = None`. **Do not pass `endpoint` when using `mailbox=True`.**
 * **No Mailbox Key in 0.26.1:** `parse_agentverse_config` discards anything before `@`. `AGENTVERSE_MAILBOX_KEY` is obsolete and cannot authenticate anything; WARDEN treats it only as a deprecated trigger that selects mailbox mode with a warning.
 * **Polling Loop:** `MailboxClient._check_mailbox_loop()` continuously polls `GET {agents_api}/{address}/mailbox` with `Authorization: Agent <attestation>`, where the attestation is signed by the agent's private key.
 * **Unprovisioned status:** If the mailbox has not yet been registered on Agentverse, the mailbox API responds with **HTTP 404**, and the agent logs:
@@ -81,6 +82,7 @@ exercised in tests with mocked contexts, not against a live peer.
 
 ### 2.5 Security Invariants & Approver Authorization
 * **Loopback binding:** WARDEN enforces `uagents.asgi.HOST = "127.0.0.1"` (`restrict_bind_host`) unless `--bind-all` is explicitly passed.
+* **Private Network Access (PNA) CORS:** WARDEN's ASGI runner automatically includes `Access-Control-Allow-Private-Network: true` on OPTIONS preflight responses so that modern browsers can reach loopback REST handlers from `https://agentverse.ai`.
 * **Approver isolation:** By default, only the sender who requested an action can approve it. However, in a public chat context (e.g. ASI:One), any remote sender is the requester of their own proposals.
 * **Before public exposure:** The operator must configure `WARDEN_APPROVER_ADDRESSES` in `.env` with their personal agent address. When set, only those designated addresses (or the original requester) can authorize destructive operations.
 
@@ -114,7 +116,7 @@ Confirm that your local environment is sound:
 .\scripts\test.ps1
 .\scripts\demo.ps1
 ```
-Expected: Doctor reports 24 passed (with warnings for optional unconfigured mailbox/ASI:One key), 190 tests pass, and demo reports 12 independent checks passed.
+Expected: Doctor reports 24 passed (with warnings for optional unconfigured mailbox/ASI:One key), 192 tests pass, and demo reports 12 independent checks passed.
 
 ### Step 2: Start WARDEN in Mailbox Mode
 Launch the agent with mailbox mode enabled:
@@ -130,6 +132,10 @@ Console output will display:
   Inspector:   https://agentverse.ai/inspect/?uri=http%3A//127.0.0.1%3A8000&address=agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7
   Note:        If mailbox is not yet provisioned on Agentverse, open the
                Inspector URL above in your browser to complete connection.
+  Browser tip: If the Inspector shows 'Check your agent' instructions, your
+               browser is blocking mixed-content from HTTPS (agentverse.ai)
+               to local HTTP. In Chrome/Edge: click site settings -> allow
+               'Insecure content' for agentverse.ai and refresh the page.
 ```
 *Note: Before provisioning, the agent log will periodically show:*
 `[WARN] Agent mailbox not found: create one using the agent inspector`
@@ -139,8 +145,19 @@ Console output will display:
 2. In your web browser, log in to your account at [https://agentverse.ai](https://agentverse.ai).
 3. Navigate to the Inspector URL printed in Step 2:
    `https://agentverse.ai/inspect/?uri=http%3A//127.0.0.1%3A8000&address=agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7`
-4. In the Inspector interface, click **Connect** and select **Mailbox**.
-5. The browser communicates with `http://127.0.0.1:8000/connect`, completing the cryptographic challenge-response registration.
+4. **If the Inspector displays "Check your agent" instructions:**
+   - This popup is a generic frontend fallback caused by browser security blocking cross-origin HTTP calls from a public HTTPS page (`agentverse.ai`) to localhost (`http://127.0.0.1:8000`).
+   - **Do NOT add `endpoint=("http://127.0.0.1:8000/submit")` to your code.** In uAgents 0.26.1, adding `endpoint` overrides and disables `mailbox=True`.
+   - **In Google Chrome / Microsoft Edge:**
+     1. Click the "View site information" (tune / padlock icon) on the left side of the address bar next to `https://agentverse.ai`.
+     2. Click **Site settings**.
+     3. Locate **Insecure content** and change it from *Block (default)* to **Allow**.
+     4. Return to the Inspector tab and refresh the page (F5).
+   - **In Brave:**
+     1. Click the Brave Shields (lion icon) in the address bar.
+     2. Toggle Shields **DOWN** for `agentverse.ai` and refresh the page.
+5. Once the browser connects, the Inspector UI will display WARDEN's agent details (`agent1q0kew...`). Click **Connect** and select **Mailbox**.
+6. The browser issues `POST /connect` to `http://127.0.0.1:8000/connect`, completing the cryptographic challenge-response registration.
 
 ### Step 4: Confirm Mailbox Connectivity
 Look at the terminal where WARDEN is running:
