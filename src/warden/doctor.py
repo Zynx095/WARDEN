@@ -191,6 +191,25 @@ def check_integration_readiness() -> List[Check]:
         return checks + [Check(FAIL, "WARDEN_USE_MAILBOX", str(exc))]
     checks.append(Check(WARN if not mailbox else PASS, "Agentverse mailbox",
                         "configured (provisioning NOT verified by this tool)" if mailbox else "not enabled (optional)"))
+    if mailbox:
+        approvers = (os.getenv("WARDEN_APPROVER_ADDRESSES") or "").strip()
+        if not approvers:
+            checks.append(Check(WARN, "Public approvers (WARDEN_APPROVER_ADDRESSES)",
+                                "not set: requesters will be able to approve own proposals in chat",
+                                "Set trusted agent addresses before exposing to public users"))
+        else:
+            count = len([a for a in approvers.split(",") if a.strip()])
+            checks.append(Check(PASS, "Public approvers (WARDEN_APPROVER_ADDRESSES)",
+                                f"configured with {count} authorized address(es)"))
+
+    try:
+        pub_manifest = env_bool("AGENTVERSE_PUBLISH_MANIFEST", False)
+        checks.append(Check(PASS if pub_manifest else WARN, "Protocol manifest publication",
+                            "enabled (publishes ACP manifest to Almanac on startup)" if pub_manifest
+                            else "disabled (local-only default; enable when ready for discovery)"))
+    except ConfigError as exc:
+        checks.append(Check(FAIL, "AGENTVERSE_PUBLISH_MANIFEST", str(exc)))
+
     key = os.getenv("ASI_ONE_API_KEY", "").strip()
     checks.append(Check(PASS if key and not is_placeholder(key) else WARN, "ASI:One API key (optional)",
                         "set (value hidden; not validated against the service)" if key and not is_placeholder(key)
