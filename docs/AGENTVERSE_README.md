@@ -20,13 +20,16 @@ created for the demonstration (`README.txt`, `cache.tmp`, `debug.log`, and a dec
 ## How it decides
 
 1. Your request becomes a structured proposal (operation + target).
-2. A deterministic policy engine, not the language model, decides: **allow**, **block**
-   (protected files, paths outside the sandbox) or **require approval** (deletes, renames).
-3. An approval is bound to the exact action's digest, the file's state at the time you were
+2. A Risk Analyst lists what could go wrong (destructive impact, protected or sensitive
+   targets, scope, ambiguity). Its assessment is shown to you as advice; it decides nothing.
+3. A deterministic policy engine, not the language model, decides: **allow**, **block**
+   (protected files, paths outside the sandbox) or **require approval** (deletes, renames,
+   overwriting an existing file).
+4. An approval is bound to the exact action's digest, the file's state at the time you were
    asked, an expiry time, and the identity that may approve it. If the file changes, the
    request expires, or a different action is named, nothing runs.
-4. A restricted executor runs only signed, unexpired authorizations.
-5. WARDEN inspects the actual result before reporting it.
+5. A restricted executor runs only signed, unexpired authorizations.
+6. WARDEN inspects the actual result before reporting it.
 
 ## Possible results
 
@@ -36,5 +39,7 @@ WARDEN never reports success it has not confirmed.
 
 ## Limits of this demo
 
-File actions only, on a sandbox. Who may approve is bound to the requesting chat identity;
+File actions only, on a sandbox. Each reply ends with a short trace of what every stage did.
+Who may approve is bound to the chat identity (and, if the operator enabled independent
+approval, must be someone other than the requester);
 how ASI:One maps people to identities is controlled by ASI:One, not WARDEN.
