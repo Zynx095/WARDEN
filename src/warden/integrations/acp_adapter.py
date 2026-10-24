@@ -55,8 +55,10 @@ class WardenACPHandler:
         self.approvers: Set[str] = {a.strip() for a in approvers if a and a.strip()}
         # action_id -> sender that caused the approval request; only that sender may approve it.
         self._approval_owners: Dict[str, str] = {}
-        # Bounded message deduplication cache: msg_id -> (ack, reply)
-        self._processed_messages: Dict[str, Tuple[ChatAcknowledgement, ChatMessage]] = {}
+        # Bounded message deduplication cache: (sender, msg_id) -> (ack, reply).
+        # Scoped per sender so one peer can neither read another peer's cached reply nor
+        # suppress its messages by reusing a message id.
+        self._processed_messages: Dict[Tuple[str, str], Tuple[ChatAcknowledgement, ChatMessage]] = {}
 
     def _scrub(self, text: Any) -> str:
         """Remove local filesystem locations from text sent back to a remote chat peer."""
@@ -76,9 +78,9 @@ class WardenACPHandler:
         Guarantees idempotent delivery: duplicate messages with identical msg_id return the
         cached response without re-executing any action or creating duplicate approval proposals.
         """
-        msg_id_key = str(msg.msg_id) if getattr(msg, "msg_id", None) else None
+        msg_id_key = (str(sender), str(msg.msg_id)) if getattr(msg, "msg_id", None) else None
         if msg_id_key and msg_id_key in self._processed_messages:
-            logger.info("Duplicate ACP message %s received from %s; returning cached response", msg_id_key, sender)
+            logger.info("Duplicate ACP message %s received from %s; returning cached response", msg_id_key[1], sender)
             return self._processed_messages[msg_id_key]
 
         try:
