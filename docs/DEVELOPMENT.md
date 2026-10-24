@@ -84,19 +84,30 @@ WARDEN uses `pytest` with automatic discovery configured in `pyproject.toml`.
 .\.venv\Scripts\python.exe -m pytest -v
 ```
 
-Expected result (Phase 2 local setup): **184 passed, 0 failed, 0 warnings**, about 16 s. Tests that need PowerShell
-(script parsing) are skipped if neither `pwsh` nor `powershell` is on PATH. No test touches the network or a real credential.
+Expected result (2026-10-24, Windows 11, Python 3.12): **652 passed, 0 failed**, about 95 s. Tests that need PowerShell
+(script parsing) are skipped if neither `pwsh` nor `powershell` is on PATH. No test touches an external network or a real
+credential; the live tests exchange real uAgents envelopes on loopback only.
 
 ### 3.2 Execute Targeted Test Suites
 
-**Unit Tests (Policy, Path Validation, Authorization, Audit, Agent):**
+**Unit Tests (Policy, Path Validation, Authorization, Digest, Cards, Config, Agent):**
 ```powershell
 python -m pytest tests/unit/ -v
 ```
 
-**Integration Tests (Restricted Executor & Workspace Containment):**
+**Integration Tests (Executor, Approval Binding, Interactive Cards, Remote Auditor, Sentinel Network):**
 ```powershell
 python -m pytest tests/integration/ -v
+```
+
+**Risk Analyst (Contract, Analysis, Authority Boundaries):**
+```powershell
+python -m pytest tests/risk/ -v
+```
+
+**Auditor Agent, Hosting, Presentation, Acceptance:**
+```powershell
+python -m pytest tests/auditor/ tests/hosting/ tests/presentation/ tests/acceptance/ -v
 ```
 
 **Adversarial Security Tests (Prompt Injection, Forged Tokens, Fake Success):**
