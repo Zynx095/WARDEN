@@ -1,0 +1,16 @@
+# Never ship secrets, local state or development artefacts into the image.
+.env
+*.env
+!.env.example
+.venv/
+venv/
+.git/
+logs/
+temp_workspace/
+temp_demo_workspace/
+hosted_workspace/
+tests/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+*.egg-info/
