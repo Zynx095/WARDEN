@@ -146,6 +146,7 @@ def build_warden_agent(
     readme_path: Optional[str] = None,
     resolver: Optional[Resolver] = None,
     loop: Optional[asyncio.AbstractEventLoop] = None,
+    interactive_cards: Optional[bool] = None,
 ) -> Agent:
     """Build and configure a uAgents Agent running WARDEN with native ACP.
 
@@ -194,7 +195,10 @@ def build_warden_agent(
         description=agent_desc,
         readme_path=agent_readme,
     )
-    agent.include(create_acp_protocol(warden=warden_core), publish_manifest=publish_manifest)
+    agent.include(
+        create_acp_protocol(warden=warden_core, interactive_cards=interactive_cards),
+        publish_manifest=publish_manifest,
+    )
 
     logger.info("=" * 60)
     logger.info("[WARDEN] Autonomous Verification Agent Initialized")

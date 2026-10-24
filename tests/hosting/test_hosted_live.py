@@ -24,12 +24,14 @@ from uagents.resolver import RulesBasedResolver
 from uagents_core.contrib.protocols.chat import (
     ChatAcknowledgement,
     ChatMessage,
+    MetadataContent,
     TextContent,
     chat_protocol_spec,
 )
 
 from warden.hosting.config import HostedConfig
 from warden.hosting.server import HEALTH_ROUTE, build_hosted_agent
+from warden.integrations.cards import validate_card_metadata
 
 WARDEN_SEED = "hosted-live-test-warden-seed-not-real-01"
 CLIENT_SEED = "hosted-live-test-client-seed-not-real-02"
@@ -105,6 +107,7 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
 
     outbox: "queue.Queue[str]" = queue.Queue()
     inbox: "queue.Queue[str]" = queue.Queue()
+    card_inbox: "queue.Queue[list]" = queue.Queue()
     client = Agent(
         name="asi-one-stand-in", seed=CLIENT_SEED, port=client_port, endpoint=[client_url],
         resolve=RulesBasedResolver({warden_id.address: warden_url}), loop=asyncio.new_event_loop(),
@@ -115,6 +118,7 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
 
     @chat.on_message(model=ChatMessage)
     async def got_reply(ctx: Context, sender: str, msg: ChatMessage):
+        card_inbox.put([dict(c.metadata) for c in msg.content if isinstance(c, MetadataContent)])
         inbox.put("".join(c.text for c in msg.content if isinstance(c, TextContent)))
         await ctx.send(sender, ChatAcknowledgement(acknowledged_msg_id=msg.msg_id))
 
@@ -134,9 +138,13 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
     wait_for_port(warden_port)
     wait_for_port(client_port)
 
+    last_cards: list = []
+
     def ask(text, timeout=20):
         outbox.put(text)
-        return inbox.get(timeout=timeout)
+        reply = inbox.get(timeout=timeout)
+        last_cards[:] = card_inbox.get(timeout=timeout)
+        return reply
 
     health = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{warden_port}{HEALTH_ROUTE}", timeout=5).read())
     assert health["status"] == "ok" and health["workspace_ready"] is True
@@ -153,5 +161,18 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
     final = ask(f"APPROVE {action_id} {digest}")
     assert "VERIFIED" in final and not (tmp_path / "hosted" / "cache.tmp").exists()
     assert str(tmp_path) not in blocked_reply + pending_reply + final
+
+    # Interactive card over the wire: the review card arrives intact and its button selection,
+    # sent back as a chat message, goes through the same checks.
+    ask("delete debug.log")
+    (review,) = last_cards
+    validate_card_metadata(review)
+    assert review["card_kind"] == "review"
+    selection = json.loads(review["card_payload"])["approve_cta"]["selection"]
+    clicked = ask(json.dumps(selection))
+    (result_card,) = last_cards
+    assert result_card["is_terminal"] == "true" and '"label":"VERIFIED"' in result_card["card_payload"]
+    assert "VERIFIED" in clicked and not (tmp_path / "hosted" / "debug.log").exists()
+    assert str(tmp_path) not in json.dumps(review) + json.dumps(result_card)
 
     assert offline == [], f"unexpected non-loopback HTTP attempts: {offline}"
