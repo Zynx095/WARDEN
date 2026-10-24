@@ -64,7 +64,7 @@ def test_primary_cleanup_workflow_end_to_end(disposable_workspace: Workspace):
     assert "[AWAITING APPROVAL]" in reply_text
 
     # Extract pending action IDs from the reply
-    pending_ids = re.findall(r"APPROVE\s+([a-f0-9\-]+)", reply_text)
+    pending_ids = re.findall(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply_text)
     assert len(pending_ids) >= 1, "Expected pending approvals for destructive DELETE actions."
 
     # Verify that before approval, files are STILL present on disk (no premature execution)

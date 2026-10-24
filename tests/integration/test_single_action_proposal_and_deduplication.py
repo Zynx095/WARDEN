@@ -59,7 +59,7 @@ def test_live_agentverse_request_proposes_single_action(workspace_with_fixtures:
     assert "WDN-004" in reply_text
     assert "debug.log" not in reply_text
 
-    pending_ids = re.findall(r"APPROVE\s+([a-f0-9\-]+)", reply_text)
+    pending_ids = re.findall(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply_text)
     assert len(pending_ids) == 1
 
     # Neither file should be deleted yet
@@ -80,7 +80,7 @@ def test_repeated_distinct_requests_behave_correctly(workspace_with_fixtures: Wo
     msg1 = ChatMessage(content=[TextContent(type="text", text="Delete cache.tmp")])
     _, reply1 = handler.process_chat_message(msg1, sender="operator")
     assert "Evaluated 1 proposed operation(s):" in reply1.content[0].text
-    pending1 = re.search(r"APPROVE\s+([a-f0-9\-]+)", reply1.content[0].text).group(1)
+    pending1 = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply1.content[0].text).group(1)
 
     # Approve Request 1
     approve_msg1 = ChatMessage(content=[TextContent(type="text", text=f"APPROVE {pending1}")])
@@ -94,7 +94,7 @@ def test_repeated_distinct_requests_behave_correctly(workspace_with_fixtures: Wo
     msg2 = ChatMessage(content=[TextContent(type="text", text="Delete debug.log")])
     _, reply2 = handler.process_chat_message(msg2, sender="operator")
     assert "Evaluated 1 proposed operation(s):" in reply2.content[0].text
-    pending2 = re.search(r"APPROVE\s+([a-f0-9\-]+)", reply2.content[0].text).group(1)
+    pending2 = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply2.content[0].text).group(1)
     assert pending2 != pending1
 
     # Approve Request 2
@@ -116,7 +116,7 @@ def test_duplicate_message_delivery_does_not_execute_action_twice(workspace_with
     # Propose deletion of cache.tmp
     prep_msg = ChatMessage(content=[TextContent(type="text", text="Delete cache.tmp")])
     _, prep_reply = handler.process_chat_message(prep_msg, sender="operator")
-    pending_id = re.search(r"APPROVE\s+([a-f0-9\-]+)", prep_reply.content[0].text).group(1)
+    pending_id = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", prep_reply.content[0].text).group(1)
 
     # Create the approval message
     approve_msg = ChatMessage(content=[TextContent(type="text", text=f"APPROVE {pending_id}")])
@@ -155,11 +155,11 @@ def test_duplicate_proposal_message_returns_cached_proposal(workspace_with_fixtu
 
     # Delivery 1
     _, reply1 = handler.process_chat_message(proposal_msg, sender="operator")
-    id1 = re.search(r"APPROVE\s+([a-f0-9\-]+)", reply1.content[0].text).group(1)
+    id1 = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply1.content[0].text).group(1)
 
     # Delivery 2 (same msg_id)
     _, reply2 = handler.process_chat_message(proposal_msg, sender="operator")
-    id2 = re.search(r"APPROVE\s+([a-f0-9\-]+)", reply2.content[0].text).group(1)
+    id2 = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply2.content[0].text).group(1)
 
     # Must return the identical cached proposal, not create a second pending action
     assert id1 == id2

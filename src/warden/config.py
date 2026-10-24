@@ -84,6 +84,20 @@ def _always_on(name: str) -> bool:
     return True
 
 
+def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    """Parse a bounded integer setting; malformed or out-of-range values are an error."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        raise ConfigError(f"{name} must be an integer between {minimum} and {maximum}.") from None
+    if not minimum <= value <= maximum:
+        raise ConfigError(f"{name} must be an integer between {minimum} and {maximum}.")
+    return value
+
+
 def _log_level() -> str:
     level = os.getenv("WARDEN_LOG_LEVEL", "INFO").strip().upper() or "INFO"
     if level not in VALID_LOG_LEVELS:
@@ -134,6 +148,12 @@ class WardenConfig(BaseModel):
         default_factory=lambda: _always_on("WARDEN_REQUIRE_APPROVAL_FOR_DESTRUCTIVE")
     )
     audit_log: Optional[Path] = Field(default_factory=_audit_log)
+    approval_ttl_seconds: int = Field(
+        default_factory=lambda: env_int("WARDEN_APPROVAL_TTL_SECONDS", 300, 10, 86400)
+    )
+    max_pending_approvals: int = Field(
+        default_factory=lambda: env_int("WARDEN_MAX_PENDING_APPROVALS", 50, 1, 10000)
+    )
     secret_key: str = Field(default_factory=_secret_key, repr=False)
 
 

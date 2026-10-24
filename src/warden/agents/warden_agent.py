@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 from warden.audit.auditor import OutcomeAuditor
@@ -21,9 +22,25 @@ from warden.models import (
     PolicyResult,
     VerificationResult,
 )
-from warden.security.authorization import AuthorizationError, AuthorizationManager
+from warden.security.authorization import AuthorizationError, AuthorizationManager, PendingQueueFull
+from warden.security.digest import (
+    capture_target_state,
+    compute_action_digest,
+    compute_state_digest,
+    sha256_text,
+)
 from warden.security.path_validation import PathValidator
 from warden.security.policy import PolicyEngine
+
+
+@dataclass(frozen=True)
+class ActionBinding:
+    """Canonical identity and observed state of one proposed action."""
+    action_digest: str
+    state_digest: str
+    target_path: Path
+    destination_path: Optional[Path]
+    target_display: str
 
 
 class WardenAgent:
@@ -54,6 +71,28 @@ class WardenAgent:
         )
         self.auditor = OutcomeAuditor(self.workspace, path_validator=self.path_validator)
         self.audit_logger = AuditLogger(audit_log_file)
+
+    def _bind(self, action: Action) -> Optional[ActionBinding]:
+        """Canonicalize an action and fingerprint the paths it touches; None if it cannot be bound."""
+        allow_root = (action.operation.upper() == ActionType.READ.value)
+        target_val = self.path_validator.validate_path(action.target, allow_root=allow_root)
+        if not target_val.is_safe or not target_val.canonical_path:
+            return None
+        dest_path: Optional[Path] = None
+        if action.destination:
+            dest_val = self.path_validator.validate_path(action.destination)
+            if not dest_val.is_safe or not dest_val.canonical_path:
+                return None
+            dest_path = dest_val.canonical_path
+        return ActionBinding(
+            action_digest=compute_action_digest(
+                action.operation, target_val.canonical_path, dest_path, action.content, self.workspace.root_path
+            ),
+            state_digest=compute_state_digest(capture_target_state(target_val.canonical_path, dest_path)),
+            target_path=target_val.canonical_path,
+            destination_path=dest_path,
+            target_display=target_val.relative_path or action.target,
+        )
 
     def handle_action_request(
         self,
@@ -105,7 +144,19 @@ class WardenAgent:
 
         # Handle REQUIRE_APPROVAL decisions
         if policy_result.decision == Decision.REQUIRE_APPROVAL:
-            pending_id = self.auth_manager.register_pending_approval(action, policy_result)
+            binding = self._bind(action)
+            if binding is None:
+                return self._refuse(action, correlation_id, "Action could not be canonically bound; no approval was requested.")
+            try:
+                pending_id = self.auth_manager.register_pending_approval(
+                    action,
+                    policy_result,
+                    action_digest=binding.action_digest,
+                    state_digest=binding.state_digest,
+                )
+            except PendingQueueFull as exc:
+                return self._refuse(action, correlation_id, str(exc))
+            pending = self.auth_manager.get_pending_approval(pending_id)
             self.audit_logger.record(
                 AuditEvent(
                     correlation_id=correlation_id,
@@ -115,7 +166,7 @@ class WardenAgent:
                     decision=Decision.REQUIRE_APPROVAL,
                     policy_id=policy_result.policy_id,
                     execution_status=ExecutionStatus.AWAITING_APPROVAL,
-                    metadata={"pending_id": pending_id},
+                    metadata={"pending_id": pending_id, "action_digest": binding.action_digest},
                 )
             )
             return {
@@ -126,22 +177,27 @@ class WardenAgent:
                 "policy_id": policy_result.policy_id,
                 "pending_id": pending_id,
                 "reason": policy_result.reason,
+                "operation": action.operation.upper(),
+                "target": binding.target_display,
+                "destination": action.destination,
+                "content_sha256": sha256_text(action.content) if action.content is not None else None,
+                "action_digest": binding.action_digest,
+                "expires_at": pending.expires_at.isoformat() if pending and pending.expires_at else None,
                 "executed": False,
                 "verified": False,
             }
 
         # Step 3: Authorization Grant
-        allow_root = (action.operation.upper() == ActionType.READ.value)
-        target_val = self.path_validator.validate_path(action.target, allow_root=allow_root)
-        dest_val = self.path_validator.validate_path(action.destination) if action.destination else None
-
-        assert target_val.canonical_path is not None
+        binding = self._bind(action)
+        if binding is None:
+            return self._refuse(action, correlation_id, "Action could not be canonically bound; nothing was authorized.")
         auth_token = self.auth_manager.issue_token(
             action=action,
-            target_canonical=target_val.canonical_path,
-            destination_canonical=dest_val.canonical_path if dest_val else None,
+            target_canonical=binding.target_path,
+            destination_canonical=binding.destination_path,
             workspace_root=self.workspace.root_path,
             policy_id=policy_result.policy_id,
+            state_digest=binding.state_digest,
         )
 
         self.audit_logger.record(
@@ -222,50 +278,67 @@ class WardenAgent:
             "observed_state": verification.observed_state,
         }
 
-    def approve_and_execute(self, action_id: str, approver_id: str) -> Dict[str, Any]:
-        """Explicitly approve a pending action and execute it through verification."""
+    def _refuse(self, action: Action, correlation_id: str, reason: str) -> Dict[str, Any]:
+        """Fail closed: record why nothing was authorized or approved and report a FAILED result."""
+        self.audit_logger.record(
+            AuditEvent(
+                correlation_id=correlation_id,
+                operation=action.operation,
+                target=action.target,
+                destination=action.destination,
+                execution_status=ExecutionStatus.FAILED,
+                error=reason,
+            )
+        )
+        return {
+            "action_id": action.action_id,
+            "correlation_id": correlation_id,
+            "status": ExecutionStatus.FAILED,
+            "error": reason,
+            "executed": False,
+            "verified": False,
+        }
+
+    def approve_and_execute(
+        self,
+        action_id: str,
+        approver_id: str,
+        expected_digest: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Explicitly approve a pending action and execute it through verification.
+
+        ``expected_digest`` is the action digest the operator was shown; when supplied it must
+        match the pending action. The touched paths are re-fingerprinted and the approval is
+        invalidated if they changed since it was requested.
+        """
         pending = self.auth_manager.get_pending_approval(action_id)
         if not pending:
             return {
                 "action_id": action_id,
                 "status": ExecutionStatus.FAILED,
-                "error": f"No pending approval found for {action_id}.",
+                "error": f"No pending approval found for {action_id} (unknown, already used or expired).",
                 "executed": False,
                 "verified": False,
             }
 
         action = pending.action
-        allow_root = (action.operation.upper() == ActionType.READ.value)
-        target_val = self.path_validator.validate_path(action.target, allow_root=allow_root)
-        dest_val = self.path_validator.validate_path(action.destination) if action.destination else None
-
-        if not target_val.is_safe or not target_val.canonical_path:
-            return {
-                "action_id": action_id,
-                "status": ExecutionStatus.FAILED,
-                "error": "Target path invalid upon approval.",
-                "executed": False,
-                "verified": False,
-            }
+        correlation_id = action.correlation_id or action.action_id
+        binding = self._bind(action)
+        if binding is None:
+            return self._refuse(action, correlation_id, "Target path invalid upon approval.")
 
         try:
             auth_token = self.auth_manager.approve_pending_action(
                 action_id=action_id,
                 approver_id=approver_id,
-                target_canonical=target_val.canonical_path,
-                destination_canonical=dest_val.canonical_path if dest_val else None,
+                target_canonical=binding.target_path,
+                destination_canonical=binding.destination_path,
                 workspace_root=self.workspace.root_path,
+                expected_digest=expected_digest,
+                current_state_digest=binding.state_digest,
             )
         except AuthorizationError as exc:
-            return {
-                "action_id": action_id,
-                "status": ExecutionStatus.FAILED,
-                "error": str(exc),
-                "executed": False,
-                "verified": False,
-            }
-
-        correlation_id = action.correlation_id or action.action_id
+            return self._refuse(action, correlation_id, str(exc))
 
         # Execute approved action
         exec_request = ExecutionRequest(action=action, authorization=auth_token)

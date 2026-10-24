@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 
 MAX_MESSAGE_CHARS = 4000
 
+# "APPROVE <action_id> <action digest>": the operator echoes the digest shown in the prompt.
+APPROVE_PATTERN = re.compile(r"^\s*APPROVE\s+([a-f0-9\-]+)(?:\s+([a-f0-9]{16,64}))?", re.IGNORECASE)
+
+
+def _display(value: Any, limit: int = 200) -> str:
+    """Render untrusted text safely inside a single-line markdown code span."""
+    text = "".join(ch for ch in str(value) if ch.isprintable() and ch != "`")
+    return text[:limit]
+
 
 class WardenACPHandler:
     """Processes incoming Agent Chat Protocol messages through WARDEN's verification core."""
@@ -125,9 +134,10 @@ class WardenACPHandler:
 
         # 3. Check for human approval command in conversation: "APPROVE <action_id>"
         clean_user_text = re.sub(r"^\s*@\S+\s*", "", user_text)
-        approval_match = re.search(r"^\s*APPROVE\s+([a-f0-9\-]+)", clean_user_text, re.IGNORECASE)
+        approval_match = APPROVE_PATTERN.search(clean_user_text)
         if approval_match:
             action_id = approval_match.group(1).strip()
+            supplied_digest = approval_match.group(2)
             owner = self._approval_owners.get(action_id)
             if owner is not None and owner != sender and sender not in self.approvers:
                 logger.warning("Approval attempt by a sender that did not request action %s", action_id[:8])
@@ -136,7 +146,16 @@ class WardenACPHandler:
                     "may approve it. No action was taken."
                 )
                 return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
-            approval_result = self.warden.approve_and_execute(action_id=action_id, approver_id=sender)
+            if supplied_digest is None and self.warden.auth_manager.get_pending_approval(action_id) is not None:
+                reply_text = (
+                    f"[WARDEN] Approval refused for `{action_id[:8]}`: the action digest is required so that you "
+                    "approve exactly what was shown. Reply `APPROVE <action_id> <digest>` using the full command "
+                    "from the approval request. No action was taken."
+                )
+                return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
+            approval_result = self.warden.approve_and_execute(
+                action_id=action_id, approver_id=sender, expected_digest=supplied_digest
+            )
             reply_text = self._scrub(self._format_approval_response(action_id, approval_result))
             return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
 
@@ -166,6 +185,7 @@ class WardenACPHandler:
 
         # 5. Evaluate and execute proposed actions through WARDEN's pipeline
         results: List[Dict[str, Any]] = []
+        self._prune_approval_owners()
         for action in proposed_actions:
             res = self.warden.handle_action_request(action)
             if res.get("status") == ExecutionStatus.AWAITING_APPROVAL:
@@ -175,6 +195,11 @@ class WardenACPHandler:
         # 6. Format structured conversational response
         reply_text = self._scrub(self._format_pipeline_response(user_text, results))
         return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
+
+    def _prune_approval_owners(self) -> None:
+        """Forget owners of approvals that are no longer pending (expired, used or invalidated)."""
+        for aid in [a for a in self._approval_owners if self.warden.auth_manager.get_pending_approval(a) is None]:
+            del self._approval_owners[aid]
 
     def _format_approval_response(self, action_id: str, res: Dict[str, Any]) -> str:
         """Format the response after a human approval decision."""
@@ -228,13 +253,25 @@ class WardenACPHandler:
                 )
             elif status == ExecutionStatus.AWAITING_APPROVAL:
                 pending_id = r.get("pending_id", action_id)
-                lines.append(
-                    f"**{idx}. [AWAITING APPROVAL]** Action `{action_id[:8]}`\n"
-                    f"   - **Policy:** `{r.get('policy_id')}` (Destructive Action)\n"
-                    f"   - **Reason:** {r.get('reason')}\n"
-                    f"   - **Action Required:** Operation paused. Reply with:\n"
-                    f"     `APPROVE {pending_id}` to authorize execution."
+                detail = [
+                    f"**{idx}. [AWAITING APPROVAL]** Action `{action_id[:8]}`",
+                    f"   - **Policy:** `{r.get('policy_id')}` (Destructive Action)",
+                    f"   - **Reason:** {r.get('reason')}",
+                    f"   - **Operation:** `{_display(r.get('operation', '?'))}`",
+                    f"   - **Target:** `{_display(r.get('target', '?'))}`",
+                ]
+                if r.get("destination"):
+                    detail.append(f"   - **Destination:** `{_display(r['destination'])}`")
+                if r.get("content_sha256"):
+                    detail.append(f"   - **Content SHA-256:** `{r['content_sha256']}`")
+                detail.append(f"   - **Action digest:** `{r.get('action_digest')}`")
+                if r.get("expires_at"):
+                    detail.append(f"   - **Expires:** {r['expires_at']}")
+                detail.append(
+                    "   - **Action Required:** Operation paused. To authorize exactly this action, reply with:\n"
+                    f"     `APPROVE {pending_id} {r.get('action_digest')}`"
                 )
+                lines.append("\n".join(detail))
             else:
                 lines.append(
                     f"**{idx}. [FAILED]** Action `{action_id[:8]}`\n"
