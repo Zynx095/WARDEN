@@ -22,9 +22,11 @@ Branch `integration/sentinel-final` (worktree `D:\AI\WARDEN_final`), built on
 | Hosted startup validation | `python -m warden.hosting.server` with a missing approval mode, `independent` without approvers, no state DB, a corrupt state DB, an `http://` endpoint | each refused with a specific error, exit 1 |
 | Registration | `python -m warden.hosting.register --dry-run` (throwaway seed) | profile printed, nothing sent |
 
-One full-suite run on the earlier hosting branch failed once in `tests/hosting/test_hosted_live.py`
-and could not be reproduced afterwards; the likely cause (a connection reset when an oversized
-body is refused) is handled, but it was not confirmed. No linter or type checker is configured.
+`tests/hosting/test_hosted_live.py` failed intermittently twice during development (once on
+`feature/asi-hosting`, once on this branch at `196866e`), both times only inside a full-suite run;
+its failure output was not captured and it has not recurred in the later full runs. One suspected
+cause (a connection reset when an oversized body is refused) is tolerated by the test; the real
+cause is not confirmed, so treat that test as possibly flaky. No linter or type checker is configured.
 
 ## Not verified
 
