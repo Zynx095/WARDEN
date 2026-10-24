@@ -165,7 +165,6 @@ def test_pending_approval_workflow(auth_manager: AuthorizationManager, workspace
     action_id = auth_manager.register_pending_approval(action, policy_res)
     pending = auth_manager.get_pending_approval(action_id)
     assert pending is not None
-    assert pending.is_approved is False
 
     # Explicit human approval
     token = auth_manager.approve_pending_action(
@@ -176,8 +175,10 @@ def test_pending_approval_workflow(auth_manager: AuthorizationManager, workspace
         workspace_root=workspace_path,
     )
     assert token is not None
-    assert pending.is_approved is True
-    assert pending.approved_by == "security_officer_alice"
+    # Approval consumes the request: it leaves the live queue and is remembered as approved.
+    assert auth_manager.get_pending_approval(action_id) is None
+    resolved = auth_manager.get_resolved(action_id)
+    assert resolved.outcome == "APPROVED" and resolved.resolved_by == "security_officer_alice"
 
     # Cannot approve twice
     with pytest.raises(AuthorizationError):
