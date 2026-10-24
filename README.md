@@ -428,6 +428,18 @@ Older audit records (`INITIAL_AUDIT`, `PHASE1_AUDIT`, `LOCAL_READINESS_AUDIT`, `
 
 ---
 
+## 🙏 Credits
+
+**WARDEN** is designed and built by **[Zynx095](https://github.com/Zynx095)** for Fetch-A-Thon 3.0.
+
+Development was assisted by **[Claude](https://www.anthropic.com/claude)** (Anthropic) through
+[Claude Code](https://claude.com/claude-code), which helped with implementation, testing, security review and documentation.
+The design decisions, review and responsibility for the project rest with the author.
+
+Built on [Fetch.ai uAgents](https://fetch.ai), the Agent Chat Protocol and [ASI:One](https://asi1.ai).
+
+---
+
 ## 📄 License
 
 [Apache License 2.0](LICENSE)
