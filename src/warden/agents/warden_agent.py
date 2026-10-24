@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 from warden.audit.auditor import OutcomeAuditor
 from warden.audit.events import AuditLogger
 from warden.config import ConfigError, WardenConfig, get_config
@@ -22,7 +22,12 @@ from warden.models import (
     PolicyResult,
     VerificationResult,
 )
-from warden.security.authorization import AuthorizationError, AuthorizationManager, PendingQueueFull
+from warden.security.authorization import (
+    ApprovalExpired,
+    AuthorizationError,
+    AuthorizationManager,
+    PendingQueueFull,
+)
 from warden.security.digest import (
     capture_target_state,
     compute_action_digest,
@@ -102,8 +107,13 @@ class WardenAgent:
         self,
         action: Action,
         auto_execute_allowed: bool = True,
+        authorized_approvers: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
-        """Process an action request through the complete verification pipeline."""
+        """Process an action request through the complete verification pipeline.
+
+        ``authorized_approvers``, when given, is bound into a resulting approval request: only
+        those identities can later approve or reject it, whatever channel the decision uses.
+        """
         correlation_id = action.correlation_id or action.action_id
 
         # Step 1: Log proposal
@@ -157,6 +167,7 @@ class WardenAgent:
                     policy_result,
                     action_digest=binding.action_digest,
                     state_digest=binding.state_digest,
+                    authorized_approvers=authorized_approvers,
                 )
             except PendingQueueFull as exc:
                 return self._refuse(action, correlation_id, str(exc))
@@ -328,15 +339,10 @@ class WardenAgent:
         match the pending action. The touched paths are re-fingerprinted and the approval is
         invalidated if they changed since it was requested.
         """
-        pending = self.auth_manager.get_pending_approval(action_id)
-        if not pending:
-            return {
-                "action_id": action_id,
-                "status": ExecutionStatus.FAILED,
-                "error": f"No pending approval found for {action_id} (unknown, already used or expired).",
-                "executed": False,
-                "verified": False,
-            }
+        try:
+            pending = self.auth_manager.lookup_pending(action_id)
+        except AuthorizationError as exc:
+            return self._decision_refused(action_id, exc)
 
         action = pending.action
         correlation_id = action.correlation_id or action.action_id
@@ -355,7 +361,21 @@ class WardenAgent:
                 current_state_digest=binding.state_digest,
             )
         except AuthorizationError as exc:
-            return self._refuse(action, correlation_id, str(exc))
+            return {**self._refuse(action, correlation_id, str(exc)), **self._describe(action, binding)}
+
+        self.audit_logger.record(
+            AuditEvent(
+                correlation_id=correlation_id,
+                operation=action.operation,
+                target=action.target,
+                destination=action.destination,
+                decision=Decision.ALLOW,
+                policy_id="WDN-004-APPROVED",
+                execution_status=ExecutionStatus.AUTHORIZED,
+                metadata={"approved_by": approver_id, "action_digest": binding.action_digest,
+                          "token_id": auth_token.token_id},
+            )
+        )
 
         # Execute approved action
         pre_state = self.auditor.capture_pre_state(action)
@@ -363,6 +383,17 @@ class WardenAgent:
         exec_result = self.executor.execute(exec_request)
 
         if not exec_result.success:
+            self.audit_logger.record(
+                AuditEvent(
+                    correlation_id=correlation_id,
+                    operation=action.operation,
+                    target=action.target,
+                    destination=action.destination,
+                    execution_status=ExecutionStatus.FAILED,
+                    error=exec_result.error,
+                    metadata={"approved_by": approver_id, "action_digest": binding.action_digest},
+                )
+            )
             return {
                 "action_id": action_id,
                 "correlation_id": correlation_id,
@@ -370,6 +401,7 @@ class WardenAgent:
                 "error": exec_result.error,
                 "executed": False,
                 "verified": False,
+                **self._describe(action, binding),
             }
 
         verification = self.auditor.verify_outcome(action, exec_result, pre_state)
@@ -401,4 +433,79 @@ class WardenAgent:
             "output": exec_result.output,
             "verification_details": verification.details,
             "observed_state": verification.observed_state,
+            **self._describe(action, binding),
         }
+
+    def reject_pending(
+        self,
+        action_id: str,
+        approver_id: str,
+        expected_digest: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Explicitly reject a pending action; it is removed and can never be approved afterwards.
+
+        The same rules as approval apply to who may decide and which digest must be named.
+        """
+        try:
+            pending = self.auth_manager.reject_pending_action(action_id, approver_id, expected_digest)
+        except AuthorizationError as exc:
+            return self._decision_refused(action_id, exc)
+
+        action = pending.action
+        correlation_id = action.correlation_id or action.action_id
+        self.audit_logger.record(
+            AuditEvent(
+                correlation_id=correlation_id,
+                operation=action.operation,
+                target=action.target,
+                destination=action.destination,
+                execution_status=ExecutionStatus.REJECTED,
+                metadata={"rejected_by": approver_id, "action_digest": pending.action_digest},
+            )
+        )
+        return {
+            "action_id": action_id,
+            "correlation_id": correlation_id,
+            "status": ExecutionStatus.REJECTED,
+            "reason": "Rejected by an authorized approver. Nothing was executed.",
+            "executed": False,
+            "verified": False,
+            **self._describe(action, None),
+        }
+
+    @staticmethod
+    def _describe(action: Action, binding: Optional[ActionBinding]) -> Dict[str, Any]:
+        """Display fields for a decided action (workspace-relative, never an absolute path)."""
+        return {
+            "operation": action.operation.upper(),
+            "target": binding.target_display if binding else action.target,
+            "destination": action.destination,
+        }
+
+    def _decision_refused(self, action_id: str, exc: AuthorizationError) -> Dict[str, Any]:
+        """A decision that could not be applied. Expiry is reported as EXPIRED; everything else FAILED."""
+        status = ExecutionStatus.EXPIRED if isinstance(exc, ApprovalExpired) else ExecutionStatus.FAILED
+        result: Dict[str, Any] = {
+            "action_id": action_id,
+            "status": status,
+            "error": str(exc),
+            "executed": False,
+            "verified": False,
+        }
+        resolved = self.auth_manager.get_resolved(action_id)
+        if resolved is not None:
+            action = resolved.action
+            correlation_id = action.correlation_id or action.action_id
+            result.update(correlation_id=correlation_id, **self._describe(action, None))
+            self.audit_logger.record(
+                AuditEvent(
+                    correlation_id=correlation_id,
+                    operation=action.operation,
+                    target=action.target,
+                    destination=action.destination,
+                    execution_status=status,
+                    error=str(exc),
+                    metadata={"decision_refused": type(exc).__name__},
+                )
+            )
+        return result

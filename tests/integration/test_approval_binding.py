@@ -97,7 +97,7 @@ def test_expired_approval_cannot_be_used(handler, warden, ws):
 
     _, reply = say(handler, f"APPROVE {action_id} {digest}")
 
-    assert "No pending approval" in reply.content[0].text
+    assert "EXPIRED" in reply.content[0].text and "expired" in reply.content[0].text
     assert ws.exists("old.tmp")
 
 
@@ -133,7 +133,7 @@ def test_state_change_between_request_and_approval_invalidates_it(handler, ws):
     assert "state changed" in reply.content[0].text
     assert (ws.root_path / "old.tmp").read_text() == "precious data written after the request"
     _, again = say(handler, f"APPROVE {action_id} {digest}")
-    assert "No pending approval" in again.content[0].text
+    assert "invalidated" in again.content[0].text and "VERIFIED" not in again.content[0].text
     assert ws.exists("old.tmp")
 
 
