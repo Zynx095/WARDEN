@@ -107,7 +107,7 @@ def build_hosted_agent(
     api_key = (os.getenv("AGENTVERSE_API_KEY") or os.getenv("AGENTVERSE_MAILBOX_KEY") or "").strip()
     if cfg.use_mailbox and api_key:
         @agent.on_event("startup")
-        async def _connect_mailbox_startup(ctx: Context):
+        async def _connect_mailbox_startup(*args: Any, **kwargs: Any) -> None:
             try:
                 ok = await ensure_agentverse_mailbox(agent, api_key)
                 if ok:

@@ -21,7 +21,7 @@ import os
 import sys
 import urllib.parse
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 from uagents import Agent
 from uagents.resolver import Resolver
@@ -233,7 +233,7 @@ def build_warden_agent(
     )
     if use_mailbox and api_token:
         @agent.on_event("startup")
-        async def _connect_agentverse_mailbox() -> None:
+        async def _connect_agentverse_mailbox(*args: Any, **kwargs: Any) -> None:
             try:
                 from warden.hosting.server import ensure_agentverse_mailbox
                 success = await ensure_agentverse_mailbox(agent, api_token)
