@@ -150,6 +150,8 @@ class AuthorizationToken(BaseModel):
     issued_at: datetime = Field(default_factory=_now_utc)
     expires_at: datetime
     policy_id: str
+    action_digest: Optional[str] = None
+    state_digest: Optional[str] = None
     signature: str
 
 

@@ -14,6 +14,7 @@ from warden.models import (
     Decision,
     PolicyResult,
 )
+from warden.security.digest import compute_action_digest
 
 
 def _canonical_str(p: Optional[Path | str]) -> str:
@@ -65,11 +66,14 @@ class AuthorizationManager:
         workspace_root: str,
         expires_at_iso: str,
         policy_id: str,
+        action_digest: str = "",
+        state_digest: str = "",
     ) -> str:
         payload = (
             f"{token_id}|{action_id}|{operation.upper()}|"
             f"{target_canonical}|{destination_canonical}|"
-            f"{workspace_root}|{expires_at_iso}|{policy_id}"
+            f"{workspace_root}|{expires_at_iso}|{policy_id}|"
+            f"{action_digest}|{state_digest}"
         )
         return hmac.new(self.secret_key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
@@ -81,8 +85,14 @@ class AuthorizationManager:
         workspace_root: Path,
         policy_id: str,
         validity_seconds: int = 300,
+        state_digest: Optional[str] = None,
     ) -> AuthorizationToken:
-        """Issue a tamper-proof authorization token for an authorized action."""
+        """Issue a tamper-proof authorization token for an authorized action.
+
+        The token is bound to a digest of the exact operation, canonical target and
+        destination, content hash and workspace, and optionally to the observed
+        pre-execution state of the touched paths.
+        """
         import uuid
         token_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
@@ -92,6 +102,9 @@ class AuthorizationManager:
         norm_dest = _canonical_str(destination_canonical)
         norm_ws = _canonical_str(workspace_root)
 
+        action_digest = compute_action_digest(
+            action.operation, target_canonical, destination_canonical, action.content, workspace_root
+        )
         sig = self._compute_signature(
             token_id=token_id,
             action_id=action.action_id,
@@ -101,6 +114,8 @@ class AuthorizationManager:
             workspace_root=norm_ws,
             expires_at_iso=expires_at.isoformat(),
             policy_id=policy_id,
+            action_digest=action_digest,
+            state_digest=state_digest or "",
         )
 
         return AuthorizationToken(
@@ -113,6 +128,8 @@ class AuthorizationManager:
             issued_at=now,
             expires_at=expires_at,
             policy_id=policy_id,
+            action_digest=action_digest,
+            state_digest=state_digest,
             signature=sig,
         )
 
@@ -123,8 +140,13 @@ class AuthorizationManager:
         target_canonical: Path,
         destination_canonical: Optional[Path],
         workspace_root: Path,
+        current_state_digest: Optional[str] = None,
     ) -> Tuple[bool, Optional[str]]:
-        """Verify an authorization token against expected action parameters and cryptographic signature."""
+        """Verify an authorization token against expected action parameters and cryptographic signature.
+
+        ``current_state_digest`` is the freshly observed state of the touched paths; when the
+        token carries a state digest the two must match, otherwise the grant is stale.
+        """
         if token is None:
             return False, "Missing authorization token."
 
@@ -152,6 +174,15 @@ class AuthorizationManager:
         if token.workspace_root.lower() != norm_ws:
             return False, f"Authorization token workspace mismatch: expected {norm_ws}, got {token.workspace_root}."
 
+        expected_digest = compute_action_digest(
+            action.operation, target_canonical, destination_canonical, action.content, workspace_root
+        )
+        if not token.action_digest or token.action_digest != expected_digest:
+            return False, "Authorization token is not bound to this exact action (digest mismatch)."
+
+        if token.state_digest is not None and token.state_digest != current_state_digest:
+            return False, "Target state changed since authorization was granted."
+
         # Verify cryptographic signature
         expected_sig = self._compute_signature(
             token_id=token.token_id,
@@ -162,6 +193,8 @@ class AuthorizationManager:
             workspace_root=token.workspace_root,
             expires_at_iso=token.expires_at.isoformat(),
             policy_id=token.policy_id,
+            action_digest=token.action_digest or "",
+            state_digest=token.state_digest or "",
         )
 
         if not hmac.compare_digest(expected_sig, token.signature):
