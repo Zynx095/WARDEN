@@ -72,10 +72,11 @@ flowchart LR
 | **⑥** | **Auditor** | Independently checks the real outcome against pre-execution snapshots (byte hashes, existence, collateral changes). It can also require a signed attestation from a separate Auditor agent | 🔍 Verifies |
 
 **Outcomes:** `VERIFIED` · `UNVERIFIED` · `FAILED` · `BLOCKED` · `AWAITING_APPROVAL` · `REJECTED` · `EXPIRED`.
-Each reply includes a per-stage workflow trace:
+Each reply traces the stages the action actually went through, and gives its audit reference:
 
 ```text
-Trace: Intent ✅ → Risk Analyst ✅ → Policy Guard ✅ → Approval 🔒 → Executor ⬚ → Auditor ⬚
+Trace: Intent → Risk → Policy → Approval (pending) · not executed yet
+Trace: Intent → Risk → Policy → Approval (approved) → Executor → Auditor (verified)
 ```
 
 A single `action_id` and a single canonical `action_digest` follow the action through every stage, from the proposal
@@ -147,24 +148,34 @@ The demo runs fully offline on synthetic files in a disposable workspace and goe
 6. **Out-of-band check** with plain `os`/`hashlib` instead of WARDEN's own auditor. The protected file is byte-identical.
 7. **Audit trail** is read back from `logs/demo_audit.jsonl`. Blocks and verifications are recorded, and file contents are not.
 
-What an approval request looks like in chat:
+What an approval request looks like in chat (Markdown as sent; [every outcome](docs/CHAT_EXPERIENCE.md)):
 
 ```text
-3. 🔒 AWAITING APPROVAL · 🗑️ DELETE session_cache.tmp
-   - Policy: WDN-004 — Destructive action: explicit human approval required
-   - Risk (advisory, not an authorization): HIGH (review carefully): Permanently deletes session_cache.tmp (19 bytes).
-   - Action digest: d0ba0b7c2cb3f51b8ec7b5f31026191e6d4c38d95d9e074581d4a9e05aa46397
-   - Who can approve: the requester or a configured approver
-   - To approve exactly this action, reply:
-     APPROVE 72584169-5702-4838-898d-59ca24e28d2d d0ba0b7c2cb3f51b8...
-     or reject it: REJECT 72584169-5702-4838-898d-59ca24e28d2d d0ba0b7c2cb3f51b8...
-   - Trace: Intent ✅ → Risk Analyst ✅ → Policy Guard ✅ → Approval 🔒 → Executor ⬚ → Auditor ⬚
+**WARDEN Sentinel — Approval required**
+
+**Status:** 🔒 AWAITING APPROVAL
+
+- **Operation:** `DELETE`
+- **Target:** `session_cache.tmp`
+- **Policy:** `WDN-004` — Destructive action: explicit human approval required
+- **Execution:** not started. Nothing runs until an authorized approver decides.
+- **Risk (advisory):** HIGH (review carefully): Permanently deletes session_cache.tmp (19 bytes).
+- **If approved:** permanently deletes `session_cache.tmp`
+- **Approver:** you or a configured approver
+- **Expires:** in 5 min (11:15 UTC)
+
+**Decide** by replying with one line exactly as shown:
+- Approve: `APPROVE 72584169-5702-4838-898d-59ca24e28d2d d0ba0b7c2cb3f51b8ec7b5f31026191e6d4c38d95d9e074581d4a9e05aa46397`
+- Reject: `REJECT 72584169-5702-4838-898d-59ca24e28d2d d0ba0b7c2cb3f51b8ec7b5f31026191e6d4c38d95d9e074581d4a9e05aa46397`
+
+- **Trace:** Intent → Risk → Policy → Approval (pending) · not executed yet
+- **Audit ref:** `72584169-5702-4838-898d-59ca24e28d2d`
 ```
 
 And how the run ends:
 
 ```text
-✅ VERIFIED · 🗑️ DELETE session_cache.tmp | Executed after approval, and the actual outcome was independently confirmed.
+**WARDEN Sentinel — Action verified** | **Status:** ✅ VERIFIED | - **Target:** `session_cache.tmp`
 DELETE production.env -> BLOCKED; policy=WDN-003; executed=False
 
 29 records persisted to logs\demo_audit.jsonl
@@ -284,7 +295,9 @@ Connecting through the Agentverse Inspector instead needs the browser to let `ht
 Approval requests come with a **review card** (Approve / Reject) and results come with a **result card**. A card is
 presentation only. A click carries exactly the authority of typing `APPROVE <id> <digest>` and goes through the same
 `WardenACPHandler.decide` path. Every card is checked against the documented schema, and the text report is always
-sent as well. → [docs/INTERACTIVE_CARDS.md](docs/INTERACTIVE_CARDS.md)
+sent as well: compact when a card carries the details, complete when there is no card. Try every outcome offline with
+`.\.venv\Scripts\python.exe demo\preview_chat.py --cards`.
+→ [docs/CHAT_EXPERIENCE.md](docs/CHAT_EXPERIENCE.md) · [docs/INTERACTIVE_CARDS.md](docs/INTERACTIVE_CARDS.md)
 
 ---
 
@@ -434,6 +447,7 @@ keys, seeds and security-relevant `WARDEN_*` variables for every test.
 | Doc | What's inside |
 |---|---|
 | [SENTINEL_NETWORK.md](docs/SENTINEL_NETWORK.md) | Agents, contracts, communication, correlation, failure handling |
+| [CHAT_EXPERIENCE.md](docs/CHAT_EXPERIENCE.md) | Every reply and card users see, how to approve or reject, settings, local and hosted checks |
 | [INTERACTIVE_CARDS.md](docs/INTERACTIVE_CARDS.md) | Card protocol, security contract, implementation |
 | [HOSTING.md](docs/HOSTING.md) | Hosted architecture, endpoint exposure, container, registration, rollback |
 | [PERSISTENCE.md](docs/PERSISTENCE.md) | Durable state, restart recovery, audit chain |
