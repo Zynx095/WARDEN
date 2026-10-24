@@ -9,7 +9,7 @@ Branch `integration/sentinel-final` (worktree `D:\AI\WARDEN_final`), built on
 | Check | Command | Result |
 |---|---|---|
 | Compile | `python -m compileall -q src tests demo scripts` | ok |
-| Full suite | `python -m pytest` | 650 passed (run repeatedly) |
+| Full suite | `python -m pytest` | 651 passed (final tip, run twice, and again in a clean clone) |
 | Presentation | `python -m pytest tests/presentation` | 66 passed |
 | Interactive Cards | `python -m pytest tests/unit/test_cards.py tests/integration/test_interactive_cards.py` | 71 passed |
 | Acceptance | `python -m pytest tests/acceptance` | 28 passed |
@@ -17,7 +17,7 @@ Branch `integration/sentinel-final` (worktree `D:\AI\WARDEN_final`), built on
 | Security | `python -m pytest tests/security` | 41 passed |
 | Live loopback (real uAgents envelopes; Risk Analyst and Auditor as separate processes) | `python -m pytest tests/integration/test_sentinel_network_live.py tests/hosting/test_hosted_live.py tests/integration/test_remote_auditor_live.py` | 5 passed |
 | Security demo | `python demo/run_demo.py` | DEMO PASSED, 12 checks |
-| Doctor | `python -m warden.doctor` | runs; in a checkout without `.env` it reports the missing `.env` and `AGENT_SEED` (expected) |
+| Doctor | `python -m warden.doctor` | with the operator's existing `.env` (`WARDEN_ENV_FILE`): 23 passed, 7 warnings (in-memory state, `self` mode, port 8000 in use, optional integrations), 0 failed; in a checkout without `.env` it reports the missing `.env` and `AGENT_SEED` |
 | Clean checkout | fresh `git clone`, new venv, `pip install -e ".[dev]"`, `pytest`, demo | passed, no private files needed |
 | Hosted startup validation | `python -m warden.hosting.server` with a missing approval mode, `independent` without approvers, no state DB, a corrupt state DB, an `http://` endpoint | each refused with a specific error, exit 1 |
 | Registration | `python -m warden.hosting.register --dry-run` (throwaway seed) | profile printed, nothing sent |
