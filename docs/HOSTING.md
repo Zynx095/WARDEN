@@ -37,6 +37,9 @@ ASI:One ──ACP──▶ Agentverse ──HTTPS POST /submit──▶ containe
   It never returns paths, secrets or file content.
 - The remote Auditor stays off (`WARDEN_REMOTE_AUDITOR` unset) until its identity and
   transport are separately verified.
+- Interactive Cards are on by default in hosted mode (`WARDEN_INTERACTIVE_CARDS=false` turns
+  them off). Every reply leads with the plain-text report, so ASI:One's documented fallback to
+  text keeps the flow usable if a card is rejected. See docs/INTERACTIVE_CARDS.md.
 
 ## Remaining manual steps (need your accounts and permission)
 

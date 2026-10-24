@@ -11,8 +11,9 @@ created for the demonstration (`README.txt`, `cache.tmp`, `debug.log`, and a dec
 
 - `List the files in the WARDEN workspace`
 - `Read README.txt`
-- `Delete cache.tmp` → WARDEN pauses and asks for approval. Reply with the exact
-  `APPROVE <id> <digest>` line it gives you, or `REJECT <id> <digest>`.
+- `Delete cache.tmp` → WARDEN pauses and shows a review card. Press **Approve** or
+  **Reject**, or reply with the exact `APPROVE <id> <digest>` / `REJECT <id> <digest>` line
+  from its message. A button press is checked exactly like the typed line.
 - `Delete production.env` → blocked by policy, no matter how the request is phrased.
 - `Clean up temporary files`
 
