@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import urllib.parse
 import secrets
 from pathlib import Path
 from typing import Optional
@@ -100,6 +101,7 @@ def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 
 AGENT_ADDRESS_PATTERN = re.compile(r"^agent1[a-z0-9]{50,70}$")
+RISK_ANALYST_MODES = {"local", "remote", "off"}
 
 
 def _auditor_address() -> Optional[str]:
@@ -110,6 +112,36 @@ def _auditor_address() -> Optional[str]:
     if not AGENT_ADDRESS_PATTERN.match(raw):
         raise ConfigError("WARDEN_AUDITOR_ADDRESS must be a uAgents address (agent1...).")
     return raw
+
+
+def _risk_analyst_mode() -> str:
+    raw = (os.getenv("WARDEN_RISK_ANALYST") or "local").strip().lower()
+    if raw not in RISK_ANALYST_MODES:
+        raise ConfigError(f"WARDEN_RISK_ANALYST must be one of {sorted(RISK_ANALYST_MODES)}.")
+    return raw
+
+
+def _risk_analyst_address() -> Optional[str]:
+    """Address of the one Risk Analyst agent whose signed assessments WARDEN will accept."""
+    raw = (os.getenv("WARDEN_RISK_ANALYST_ADDRESS") or "").strip()
+    if not raw:
+        return None
+    if not AGENT_ADDRESS_PATTERN.match(raw):
+        raise ConfigError("WARDEN_RISK_ANALYST_ADDRESS must be a uAgents address (agent1...).")
+    return raw
+
+
+def _risk_analyst_endpoint() -> Optional[str]:
+    """Optional fixed endpoint for the analyst (e.g. a sidecar on loopback); otherwise Almanac resolves it."""
+    raw = (os.getenv("WARDEN_RISK_ANALYST_ENDPOINT") or "").strip()
+    if not raw:
+        return None
+    parsed = urllib.parse.urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path.rstrip("/") != "/submit":
+        raise ConfigError("WARDEN_RISK_ANALYST_ENDPOINT must be an absolute URL ending in /submit.")
+    if parsed.scheme == "http" and parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+        raise ConfigError("WARDEN_RISK_ANALYST_ENDPOINT may use plain http only on loopback.")
+    return raw.rstrip("/")
 
 
 def _log_level() -> str:
@@ -174,6 +206,13 @@ class WardenConfig(BaseModel):
     auditor_timeout_seconds: int = Field(
         default_factory=lambda: env_int("WARDEN_AUDITOR_TIMEOUT_SECONDS", 10, 1, 120)
     )
+    # Risk Analyst (advisory only). "local" runs it in-process; "remote" asks a separate uAgent.
+    risk_analyst: str = Field(default_factory=_risk_analyst_mode)
+    risk_analyst_address: Optional[str] = Field(default_factory=_risk_analyst_address)
+    risk_analyst_endpoint: Optional[str] = Field(default_factory=_risk_analyst_endpoint)
+    risk_analyst_timeout_seconds: int = Field(
+        default_factory=lambda: env_int("WARDEN_RISK_ANALYST_TIMEOUT_SECONDS", 5, 1, 60)
+    )
 
     secret_key: str = Field(default_factory=_secret_key, repr=False)
 
@@ -181,6 +220,8 @@ class WardenConfig(BaseModel):
         super().__init__(**data)
         if self.remote_auditor and not self.auditor_address:
             raise ConfigError("WARDEN_REMOTE_AUDITOR=true requires WARDEN_AUDITOR_ADDRESS.")
+        if self.risk_analyst == "remote" and not self.risk_analyst_address:
+            raise ConfigError("WARDEN_RISK_ANALYST=remote requires WARDEN_RISK_ANALYST_ADDRESS.")
 
 
 _DEFAULT_CONFIG: WardenConfig | None = None

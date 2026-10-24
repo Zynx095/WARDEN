@@ -15,5 +15,9 @@ def _hermetic_environment(monkeypatch: pytest.MonkeyPatch):
                  "WARDEN_MAX_PENDING_APPROVALS", "WARDEN_SECRET_KEY",
                  # hosted mode
                  "WARDEN_PUBLIC_ENDPOINT", "PORT", "WARDEN_HOSTED_ALLOW_INSECURE_ENDPOINT",
-                 "AGENTVERSE_API_KEY", "WARDEN_INTERACTIVE_CARDS", "WARDEN_MAX_REQUEST_BYTES"):
+                 "AGENTVERSE_API_KEY", "WARDEN_INTERACTIVE_CARDS", "WARDEN_MAX_REQUEST_BYTES",
+                 # risk analyst
+                 "WARDEN_RISK_ANALYST", "WARDEN_RISK_ANALYST_ADDRESS", "WARDEN_RISK_ANALYST_ENDPOINT",
+                 "WARDEN_RISK_ANALYST_TIMEOUT_SECONDS", "WARDEN_RISK_ANALYST_SEED",
+                 "WARDEN_RISK_ANALYST_ALLOWED_REQUESTER", "WARDEN_RISK_ANALYST_PORT"):
         monkeypatch.delenv(name, raising=False)
