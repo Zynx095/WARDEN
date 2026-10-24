@@ -21,6 +21,8 @@ DEFAULT_PROTECTED_FILES: Set[str] = {
     "production.env",
     "secrets.json",
     "credentials.json",
+    # Marks the hosted demo's synthetic workspace; removing it would let a restart refuse to start.
+    ".warden-demo-workspace",
 }
 
 
