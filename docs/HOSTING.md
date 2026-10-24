@@ -44,7 +44,7 @@ ASI:One ──ACP──▶ Agentverse ──HTTPS POST /submit──▶ containe
 |---|---|---|
 | `POST /submit` | yes | uAgents envelopes only. Agent senders must be signed; unsigned `user…` senders are refused by the signed chat handler. Only the Agent Chat Protocol is included. |
 | `HEAD /submit` | yes | SDK readiness probe. |
-| `GET /health` | yes | status, address, workspace readiness, remote-audit flag, endpoint scheme, approval mode, durable state, Risk Analyst mode. No paths, secrets or contents. |
+| `GET /health` | yes | status, address, workspace readiness, remote-audit flag, endpoint scheme, approval mode, durable state, Risk Analyst mode, Interactive Cards switch. No paths, secrets or contents. |
 | `/agent_info`, `/messages`, `/connect`, `/disconnect` | **no** | SDK inspector disabled: it guards `/connect` only by client IP while trusting any `X-Forwarded-For`, and `/connect` signs with the agent identity (reproduced in a test before the fix). |
 
 - Bodies above `WARDEN_MAX_REQUEST_BYTES` (256 KiB) get HTTP 400; chat text above 4000

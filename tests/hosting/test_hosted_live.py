@@ -14,6 +14,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from unittest.mock import AsyncMock, patch
 from urllib.parse import urlparse
 
 import aiohttp
@@ -153,6 +154,7 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
     assert health["status"] == "ok" and health["workspace_ready"] is True
     assert health["agent_address"] == warden_id.address
     assert health["approval_mode"] == "self" and health["durable_state"] is True and health["risk_analyst"] == "local"
+    assert health["interactive_cards"] is True  # hosted default: text report plus ASI:One cards
     assert str(tmp_path) not in json.dumps(health)
 
     blocked_reply = ask("delete production.env")
@@ -195,8 +197,15 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
 
     spoof = {"x-forwarded-for": "127.0.0.1"}
     connect = json.dumps({"user_token": "x", "agent_type": "mailbox", "endpoint": "https://attacker.example/submit"})
-    assert http("POST", "/connect", connect.encode(), spoof) == 404
-    assert http("POST", "/disconnect", b"{}", spoof) == 404
+    # The SDK answers an unserved POST with 404 without reading its body, and on Windows the
+    # connection is then sometimes reset before the client reads that answer (measured on main
+    # too: 4-31% of such requests). A reset is also "not served"; nothing may register either way.
+    with patch("uagents.agent.register_in_agentverse", new_callable=AsyncMock) as register, \
+            patch("uagents.agent.unregister_in_agentverse", new_callable=AsyncMock) as unregister:
+        assert http("POST", "/connect", connect.encode(), spoof) in (404, "reset")
+        assert http("POST", "/disconnect", b"{}", spoof) in (404, "reset")
+    register.assert_not_called()
+    unregister.assert_not_called()
     assert http("GET", "/messages", headers=spoof) == 404
     assert http("GET", "/agent_info") == 404
     # Oversized bodies are refused before parsing; the client may see the 400 or a reset connection.

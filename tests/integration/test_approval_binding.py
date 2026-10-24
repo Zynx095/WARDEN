@@ -49,12 +49,12 @@ def command_of(text) -> tuple:
 
 def test_prompt_shows_full_action_and_digest(handler):
     text = request_delete(handler)
-    assert "`DELETE` `old.tmp`" in text
-    assert "`old.tmp`" in text
-    assert "**Action digest:**" in text
+    assert "- **Operation:** `DELETE`" in text and "- **Target:** `old.tmp`" in text
+    assert "- **If approved:** permanently deletes `old.tmp`" in text
     assert "**Expires:**" in text
-    _, digest = command_of(text)
-    assert digest in text
+    action_id, digest = command_of(text)
+    assert f"`APPROVE {action_id} {digest}`" in text and f"`REJECT {action_id} {digest}`" in text
+    assert len(digest) == 64  # the full digest, which the approval must echo
 
 
 def test_approval_without_digest_is_refused_and_keeps_request_pending(handler, ws):

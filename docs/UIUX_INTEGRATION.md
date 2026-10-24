@@ -26,17 +26,26 @@ its own diff. The original branch is unchanged.
 
 ```
 WardenACPHandler (only ACP handler)
-  ├─ text:  warden.presentation.reports.format_pipeline_report / format_decision_report / format_no_action
-  │          └─ workflow_trace.stages_from_result + format_trace_line / format_workflow_trace
-  └─ cards: warden.integrations.cards (canonical builders), using badges.op_icon and the same risk text
+  ├─ cards: warden.integrations.cards (canonical builders), validated and path-scrubbed first
+  └─ text:  warden.presentation.reports.format_pipeline_report / format_decision_report / format_no_action
+             (compact=True when a valid card is attached; complete otherwise)
+             └─ workflow_trace.stages_from_result + format_trace_path
 ```
 
 Public imports: `warden.presentation.badges` (`badge`, `op_icon`, `policy_description`,
 `risk_label`), `warden.presentation.sanitize` (`sanitize`, `sanitize_block`, `scrub_paths`,
 `truncate_report`), `warden.presentation.reports` (`format_pipeline_report`,
-`format_decision_report`, `format_result_block`, `format_no_action`, `risk_line`),
-`warden.presentation.workflow_trace` (`stages_from_result`, `format_trace_line`,
-`format_workflow_trace`).
+`format_decision_report`, `format_result_block`, `format_no_action`, `format_notice`,
+`risk_line`, `expiry_text`, `effect_text`, `approver_text`, `is_refused`),
+`warden.presentation.workflow_trace` (`stages_from_result`, `format_trace_path`,
+`format_trace_line`, `format_workflow_trace`).
+
+2026-10-24 overhaul (branch `feat/acp-ux-overhaul`): one headline and one status badge per action,
+bullet fields instead of nested lists, an Execution line that states what actually ran, the
+auditor's finding as the Verification line, a plain-text trace path, the audit reference
+(correlation id), compact text next to a valid card, help text for requests without a file action,
+and operation icons removed from text and cards. Reply formats are documented in
+[CHAT_EXPERIENCE.md](CHAT_EXPERIENCE.md).
 
 ## Contract
 

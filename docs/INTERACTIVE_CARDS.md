@@ -14,6 +14,11 @@ click ─▶ chat message with the selection ─▶ WardenACPHandler.decide ─�
        ─▶ text report + terminal result card (VERIFIED | BLOCKED | REJECTED | EXPIRED | FAILED | UNVERIFIED)
 ```
 
+What each card and reply contains, and how text and cards divide the details between them
+(compact text with a valid card, complete text without one), is in
+[CHAT_EXPERIENCE.md](CHAT_EXPERIENCE.md). Result cards are glanceable (status, its meaning, the
+policy); the evidence stays in the text.
+
 ## Interface (small and documented)
 
 | Piece | Where | Contract |

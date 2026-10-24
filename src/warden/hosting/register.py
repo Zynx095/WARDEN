@@ -14,17 +14,9 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from warden.config import REPO_ROOT, ConfigError, load_environment
-from warden.hosting.config import HostedConfig
+from warden.config import ConfigError, load_environment
+from warden.hosting.config import DEFAULT_README, LISTING_METADATA, STARTER_PROMPTS, HostedConfig
 from warden.identity import AgentIdentityError, derive_agent_address, validate_seed
-
-DEFAULT_README = REPO_ROOT / "docs" / "AGENTVERSE_README.md"
-STARTER_PROMPTS: List[str] = [
-    "List the files in the WARDEN workspace",
-    "Delete cache.tmp",
-    "Clean up temporary files",
-    "Delete production.env",
-]
 
 
 def build_registration(cfg: HostedConfig, readme_path: Optional[Path] = None) -> dict:
@@ -38,7 +30,7 @@ def build_registration(cfg: HostedConfig, readme_path: Optional[Path] = None) ->
         "description": cfg.description,
         "readme": readme_file.read_text(encoding="utf-8"),
         "starter_prompts": STARTER_PROMPTS,
-        "metadata": {"categories": ["security", "developer-tools"], "is_public": "True"},
+        "metadata": LISTING_METADATA,
     }
 
 

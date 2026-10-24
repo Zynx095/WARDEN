@@ -71,7 +71,7 @@ def click(handler, selection, sender=USER):
 def test_review_card_then_approve_click_verifies(root):
     _, h = make(root)
     review = send(h, "delete cache.tmp")
-    assert text(review).startswith("**WARDEN Sentinel**")  # plain-text fallback always first
+    assert text(review).startswith("**WARDEN Sentinel — ")  # plain-text fallback always first
     result = click(h, review_selection(review))
     assert result_badge(result) == "VERIFIED" and "VERIFIED" in text(result)
     assert not (root / "cache.tmp").exists()
@@ -102,7 +102,7 @@ def test_blocked_and_permitted_actions_get_result_cards(root):
 
 def test_result_cards_name_the_operation_and_workspace_relative_target(root):
     _, h = make(root)
-    for msg, title in (("delete production.env", "🗑️ DELETE production.env"), ("read README.txt", "📖 READ README.txt")):
+    for msg, title in (("delete production.env", "DELETE production.env"), ("read README.txt", "READ README.txt")):
         (card,) = cards(send(h, msg))
         assert json.loads(card.metadata["card_payload"])["root"]["title"] == title
 
@@ -216,8 +216,9 @@ def test_execution_failure_after_approval_shows_failed(root, monkeypatch):
     monkeypatch.setattr(warden.executor, "execute", lambda r: ExecutionResult(
         action=r.action, status=ExecutionStatus.FAILED, success=False, error="simulated disk failure"))
     reply = click(h, sel)
-    assert result_badge(reply) == "FAILED" and "simulated disk failure" in json.dumps(
+    assert result_badge(reply) == "FAILED" and "Execution failed. No success is claimed." in json.dumps(
         json.loads(cards(reply)[0].metadata["card_payload"]))
+    assert "simulated disk failure" in text(reply)  # the evidence is in the text that accompanies the card
 
 
 # --- cards cannot bypass policy or act on their own ------------------------------------------
@@ -303,7 +304,7 @@ def test_cards_never_carry_file_contents_tokens_or_signing_material(root):
     payloads = []
     for msg in ("read notes.txt", "read README.txt", "delete cache.tmp"):
         reply = send(h, msg)
-        assert isinstance(reply.content[0], TextContent) and text(reply).startswith("**WARDEN Sentinel**")
+        assert isinstance(reply.content[0], TextContent) and text(reply).startswith("**WARDEN Sentinel — ")
         payloads += [c.metadata["card_payload"] for c in cards(reply)]
     sel = review_selection(send(h, "delete debug.log"))
     payloads += [c.metadata["card_payload"] for c in cards(click(h, sel))]

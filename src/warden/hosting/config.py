@@ -5,14 +5,29 @@ from __future__ import annotations
 import os
 import urllib.parse
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from warden.config import APPROVAL_MODES, ConfigError, env_bool, env_int, resolve_repo_path
+from warden.config import APPROVAL_MODES, REPO_ROOT, ConfigError, env_bool, env_int, resolve_repo_path
 
 DEFAULT_HOSTED_WORKSPACE = "./hosted_workspace"
 DEFAULT_AGENT_NAME = "warden-verification-agent"
+
+# Public Agentverse profile, shared by the hosted agent and the local mailbox agent. It
+# describes the synthetic demo workspace, so it is accurate only for agents running on it.
+DEFAULT_DESCRIPTION = (  # Agentverse allows at most 300 characters
+    "Action-security agent: deterministic policy, exact-action approval and independent "
+    "verification for file actions in a synthetic demo workspace."
+)
+DEFAULT_README = REPO_ROOT / "docs" / "AGENTVERSE_README.md"
+STARTER_PROMPTS: List[str] = [
+    "List the files in the WARDEN workspace",
+    "Delete cache.tmp",
+    "Clean up temporary files",
+    "Delete production.env",
+]
+LISTING_METADATA = {"categories": ["security", "developer-tools"], "is_public": "True"}
 
 
 def _port() -> int:
@@ -72,9 +87,7 @@ class HostedConfig(BaseModel):
     )
     # ASI:One Interactive Cards are on by default when hosted; every reply still leads with plain text.
     interactive_cards: bool = Field(default_factory=lambda: env_bool("WARDEN_INTERACTIVE_CARDS", True))
-    description: str = Field(default_factory=lambda: (os.getenv("AGENTVERSE_DESCRIPTION") or
-        "Action-security agent: deterministic policy, exact-action approval and independent "
-        "verification for file actions in a synthetic demo workspace.").strip())
+    description: str = Field(default_factory=lambda: (os.getenv("AGENTVERSE_DESCRIPTION") or DEFAULT_DESCRIPTION).strip())
     readme_path: Optional[str] = Field(default_factory=lambda: os.getenv("AGENTVERSE_README_PATH") or None)
 
     def __init__(self, **data) -> None:

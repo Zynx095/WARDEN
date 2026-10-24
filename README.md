@@ -10,7 +10,7 @@ digest-bound human approval, restricted execution and independent auditing befor
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-652%20passing-2ea44f)](tests/)
+[![Tests](https://img.shields.io/badge/tests-734%20passing-2ea44f)](tests/)
 [![uAgents](https://img.shields.io/badge/uAgents-0.26.1-FFD000)](https://fetch.ai)
 [![Protocol](https://img.shields.io/badge/Agent%20Chat%20Protocol-0.3.0-8a2be2)](https://fetch.ai)
 [![ASI:One Cards](https://img.shields.io/badge/ASI%3AOne%20Cards-v1-4E79A7)](docs/INTERACTIVE_CARDS.md)
@@ -72,10 +72,11 @@ flowchart LR
 | **⑥** | **Auditor** | Independently checks the real outcome against pre-execution snapshots (byte hashes, existence, collateral changes). It can also require a signed attestation from a separate Auditor agent | 🔍 Verifies |
 
 **Outcomes:** `VERIFIED` · `UNVERIFIED` · `FAILED` · `BLOCKED` · `AWAITING_APPROVAL` · `REJECTED` · `EXPIRED`.
-Each reply includes a per-stage workflow trace:
+Each reply traces the stages the action actually went through, and gives its audit reference:
 
 ```text
-Trace: Intent ✅ → Risk Analyst ✅ → Policy Guard ✅ → Approval 🔒 → Executor ⬚ → Auditor ⬚
+Trace: Intent → Risk → Policy → Approval (pending) · not executed yet
+Trace: Intent → Risk → Policy → Approval (approved) → Executor → Auditor (verified)
 ```
 
 A single `action_id` and a single canonical `action_digest` follow the action through every stage, from the proposal
@@ -126,7 +127,8 @@ The suite has only been run on Windows so far, so Linux and macOS are expected t
 | `.\scripts\doctor.ps1` | Checks config, identity, dependencies, Git secret hygiene, workspace, port, state DB integrity, audit hash chain and integration readiness. Never prints secrets. `-Tests` also runs pytest |
 | `.\scripts\test.ps1` | Compiles everything and runs pytest. Extra arguments are passed through (`-k cards -x`) |
 | `.\scripts\demo.ps1` | Runs the deterministic demo in `temp_demo_workspace\`. Exits non-zero if any check fails |
-| `.\scripts\run.ps1` | Starts the local agent. Flags: `-ShowAddress`, `-Port 8001`, `-Mailbox`, `-PublishManifest` |
+| `.\scripts\run.ps1` | Starts the local agent. Flags: `-ShowAddress`, `-Port 8001`, `-Mailbox`, `-PublishManifest`, `-DemoWorkspace` |
+| `.\scripts\mailbox.ps1` | Agentverse Mailbox: `status` checks what the Inspector sees, the Almanac record and the mailbox; `connect -DryRun` / `connect -Confirm` provisions it without a browser and `disconnect -Confirm` removes the registration (both need `AGENTVERSE_API_KEY`) |
 
 ---
 
@@ -146,24 +148,34 @@ The demo runs fully offline on synthetic files in a disposable workspace and goe
 6. **Out-of-band check** with plain `os`/`hashlib` instead of WARDEN's own auditor. The protected file is byte-identical.
 7. **Audit trail** is read back from `logs/demo_audit.jsonl`. Blocks and verifications are recorded, and file contents are not.
 
-What an approval request looks like in chat:
+What an approval request looks like in chat (Markdown as sent; [every outcome](docs/CHAT_EXPERIENCE.md)):
 
 ```text
-3. 🔒 AWAITING APPROVAL · 🗑️ DELETE session_cache.tmp
-   - Policy: WDN-004 — Destructive action: explicit human approval required
-   - Risk (advisory, not an authorization): HIGH (review carefully): Permanently deletes session_cache.tmp (19 bytes).
-   - Action digest: d0ba0b7c2cb3f51b8ec7b5f31026191e6d4c38d95d9e074581d4a9e05aa46397
-   - Who can approve: the requester or a configured approver
-   - To approve exactly this action, reply:
-     APPROVE 72584169-5702-4838-898d-59ca24e28d2d d0ba0b7c2cb3f51b8...
-     or reject it: REJECT 72584169-5702-4838-898d-59ca24e28d2d d0ba0b7c2cb3f51b8...
-   - Trace: Intent ✅ → Risk Analyst ✅ → Policy Guard ✅ → Approval 🔒 → Executor ⬚ → Auditor ⬚
+**WARDEN Sentinel — Approval required**
+
+**Status:** 🔒 AWAITING APPROVAL
+
+- **Operation:** `DELETE`
+- **Target:** `session_cache.tmp`
+- **Policy:** `WDN-004` — Destructive action: explicit human approval required
+- **Execution:** not started. Nothing runs until an authorized approver decides.
+- **Risk (advisory):** HIGH (review carefully): Permanently deletes session_cache.tmp (19 bytes).
+- **If approved:** permanently deletes `session_cache.tmp`
+- **Approver:** you or a configured approver
+- **Expires:** in 5 min (11:15 UTC)
+
+**Decide** by replying with one line exactly as shown:
+- Approve: `APPROVE 72584169-5702-4838-898d-59ca24e28d2d d0ba0b7c2cb3f51b8ec7b5f31026191e6d4c38d95d9e074581d4a9e05aa46397`
+- Reject: `REJECT 72584169-5702-4838-898d-59ca24e28d2d d0ba0b7c2cb3f51b8ec7b5f31026191e6d4c38d95d9e074581d4a9e05aa46397`
+
+- **Trace:** Intent → Risk → Policy → Approval (pending) · not executed yet
+- **Audit ref:** `72584169-5702-4838-898d-59ca24e28d2d`
 ```
 
 And how the run ends:
 
 ```text
-✅ VERIFIED · 🗑️ DELETE session_cache.tmp | Executed after approval, and the actual outcome was independently confirmed.
+**WARDEN Sentinel — Action verified** | **Status:** ✅ VERIFIED | - **Target:** `session_cache.tmp`
 DELETE production.env -> BLOCKED; policy=WDN-003; executed=False
 
 29 records persisted to logs\demo_audit.jsonl
@@ -263,12 +275,29 @@ Hosted mode **refuses to start** without `WARDEN_APPROVAL_MODE`, `WARDEN_STATE_D
 Approvals survive restarts, and an action interrupted mid-run is marked `INTERRUPTED` and is never re-run.
 → [docs/HOSTING.md](docs/HOSTING.md) · [docs/PERSISTENCE.md](docs/PERSISTENCE.md)
 
+### 📬 Mailbox mode (no server, no public URL)
+
+WARDEN can also stay on your machine, bound to `127.0.0.1`, while Agentverse holds a **mailbox** for its address:
+ASI:One delivers to the mailbox and WARDEN collects from it.
+
+```powershell
+.\scripts\run.ps1 -Mailbox -PublishManifest -DemoWorkspace   # start; prints the Inspector URL
+.\scripts\mailbox.ps1 connect -Confirm                        # once: provision the mailbox (or use the Inspector)
+.\scripts\mailbox.ps1 status                                  # verify every piece, including inbound chat messages
+```
+
+Connecting through the Agentverse Inspector instead needs the browser to let `https://agentverse.ai` reach
+`127.0.0.1`: allow it **Apps on device** (Local Network Access) in the site settings, or the Inspector reports
+"Agent Not Found" for a perfectly healthy agent. → [docs/INTEGRATION.md](docs/INTEGRATION.md#4-step-by-step-the-asione-mailbox-agent)
+
 ### 🃏 ASI:One Interactive Cards
 
 Approval requests come with a **review card** (Approve / Reject) and results come with a **result card**. A card is
 presentation only. A click carries exactly the authority of typing `APPROVE <id> <digest>` and goes through the same
 `WardenACPHandler.decide` path. Every card is checked against the documented schema, and the text report is always
-sent as well. → [docs/INTERACTIVE_CARDS.md](docs/INTERACTIVE_CARDS.md)
+sent as well: compact when a card carries the details, complete when there is no card. Try every outcome offline with
+`.\.venv\Scripts\python.exe demo\preview_chat.py --cards`.
+→ [docs/CHAT_EXPERIENCE.md](docs/CHAT_EXPERIENCE.md) · [docs/INTERACTIVE_CARDS.md](docs/INTERACTIVE_CARDS.md)
 
 ---
 
@@ -277,7 +306,7 @@ sent as well. → [docs/INTERACTIVE_CARDS.md](docs/INTERACTIVE_CARDS.md)
 | | Status | Scope |
 |:-:|---|---|
 | ✅ | **Implemented & tested locally** | Full six-stage pipeline · signed Risk Analyst and Auditor contracts · durable approval state and restart recovery · independent-approver mode · hash-chained audit log · hosted entry point with health route · Interactive Cards · presentation layer (badges, reports, traces) · live multi-process test with WARDEN, the Risk Analyst and the Auditor exchanging real uAgents envelopes on loopback · 12-check security demo |
-| 🟡 | **Written, not verified** | Container build (no Docker on the dev machine) · Linux runtime · mailbox and endpoint modes · ASI:One LLM intent parsing |
+| 🟡 | **Written, not verified** | Container build (no Docker on the dev machine) · Linux runtime · live mailbox provisioning and endpoint mode (both tested on loopback with Agentverse mocked) · ASI:One LLM intent parsing |
 | ⬜ | **Pending live deployment** | Agentverse registration · a real ASI:One conversation · card rendering and buttons in ASI:One · the sender identity ASI:One uses |
 
 ### Fetch-A-Thon 3.0 deliverables
@@ -358,7 +387,7 @@ not documented.
 ```text
 WARDEN/
 ├── src/warden/
-│   ├── agents/          # WardenAgent orchestrator, Intent Agent, intent engine, local runner
+│   ├── agents/          # WardenAgent orchestrator, Intent Agent, intent engine, local runner, mailbox helper
 │   ├── risk/            # Risk Analyst client, contract, deterministic analysis
 │   ├── risk_analyst/    # standalone Risk Analyst uAgent
 │   ├── security/        # policy engine, path validation, HMAC authorization, digest, state store
@@ -388,7 +417,7 @@ WARDEN/
 .\.venv\Scripts\python.exe -m pytest tests/integration/test_sentinel_network_live.py   # real multi-process loopback
 ```
 
-**652 passing.** The suite is hermetic: it never touches the network or real credentials, and it clears API
+**734 passing.** The suite is hermetic: it never touches the network or real credentials, and it clears API
 keys, seeds and security-relevant `WARDEN_*` variables for every test.
 
 ---
@@ -406,6 +435,10 @@ keys, seeds and security-relevant `WARDEN_*` variables for every test.
 | Doctor: `Port 8000 ... in use` | `.\scripts\run.ps1 -Port 8001` |
 | `Refusing to delete workspace contents` | `WARDEN_WORKSPACE_ROOT` points at a repo, home or drive root. Use a dedicated folder |
 | `No endpoints provided. Skipping registration` | Expected in local-only mode |
+| Inspector: `Agent Not Found` while the agent runs | The browser blocked agentverse.ai from reaching `127.0.0.1`. Allow **Apps on device** at `chrome://settings/content/siteDetails?site=https%3A%2F%2Fagentverse.ai` (`brave://` / `edge://`), then reload. `.\scripts\mailbox.ps1 status` confirms the agent side |
+| `Agent mailbox not found: create one using the agent inspector` | The mailbox is not provisioned yet: Inspector → Connect → Mailbox, or `.\scripts\mailbox.ps1 connect -Confirm` |
+| `I do not have enough funds to register on Almanac contract` | Expected. The on-chain record is optional; the free Almanac API registration routes messages |
+| `Port 8000 is already in use` on start | An earlier agent still runs. Stop it (`Get-NetTCPConnection -LocalPort 8000`) or use `-Port 8001` |
 
 ---
 
@@ -414,6 +447,7 @@ keys, seeds and security-relevant `WARDEN_*` variables for every test.
 | Doc | What's inside |
 |---|---|
 | [SENTINEL_NETWORK.md](docs/SENTINEL_NETWORK.md) | Agents, contracts, communication, correlation, failure handling |
+| [CHAT_EXPERIENCE.md](docs/CHAT_EXPERIENCE.md) | Every reply and card users see, how to approve or reject, settings, local and hosted checks |
 | [INTERACTIVE_CARDS.md](docs/INTERACTIVE_CARDS.md) | Card protocol, security contract, implementation |
 | [HOSTING.md](docs/HOSTING.md) | Hosted architecture, endpoint exposure, container, registration, rollback |
 | [PERSISTENCE.md](docs/PERSISTENCE.md) | Durable state, restart recovery, audit chain |
