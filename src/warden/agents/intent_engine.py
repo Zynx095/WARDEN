@@ -75,12 +75,15 @@ class IntentEngine:
             return []
 
         clean_text = re.sub(r"^\s*@\S+\s*", "", text)
+        # Which parser produced the last result: "llm" or "deterministic" (read by the Intent Agent).
+        self.last_source = "deterministic"
 
         # Attempt ASI:One LLM parsing if configured
         if self.client:
             try:
                 actions = self._call_llm(clean_text, context)
                 if actions:
+                    self.last_source = "llm"
                     return self._deduplicate_actions(actions)
             except Exception as e:
                 logger.warning(f"ASI:One LLM call failed, falling back to deterministic parser: {e}")

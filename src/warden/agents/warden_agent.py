@@ -171,6 +171,7 @@ class WardenAgent:
         batch_size: int = 1,
         requester: Optional[str] = None,
         independent_approval: bool = False,
+        proposal: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Process an action request through the complete verification pipeline.
 
@@ -190,7 +191,7 @@ class WardenAgent:
                 target=action.target,
                 destination=action.destination,
                 execution_status=ExecutionStatus.PROPOSED,
-                metadata={"reason": action.reason},
+                metadata={"reason": action.reason, **({"proposal": proposal} if proposal else {})},
             )
         )
 
