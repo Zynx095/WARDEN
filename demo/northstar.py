@@ -221,7 +221,11 @@ def audit(root: Path, show_all: bool, log: Optional[Path] = None) -> int:
         print("[ERROR] No audit log found. Set WARDEN_AUDIT_LOG (default ./logs/audit.jsonl) and run the agent.")
         return 1
     intact, checked, reason = verify_audit_chain(Path(log))
-    print(f"Audit log: {os.path.relpath(log, REPO_ROOT)}  ({reason}; {checked} chained records)")
+    try:
+        shown = os.path.relpath(log, REPO_ROOT)
+    except ValueError:  # another drive
+        shown = Path(log).name
+    print(f"Audit log: {shown}  ({reason}; {checked} chained records)")
     rows: List[dict] = []
     with open(log, encoding="utf-8") as f:
         for line in f:
@@ -233,11 +237,14 @@ def audit(root: Path, show_all: bool, log: Optional[Path] = None) -> int:
     if not rows:
         print("No audit events since the last setup.")
         return 0 if intact else 1
-    print(f"{'time (UTC)':9} {'audit ref':36}  {'operation':9} {'target':28} {'status':17} policy")
+    print(f"{'UTC':9} {'audit ref':36}  {'operation':9} {'target':28} {'status':24} policy")
     for e in rows:
         when = datetime.fromisoformat(e["timestamp"]).astimezone(timezone.utc).strftime("%H:%M:%S")
+        status = e["execution_status"]
+        if (e.get("metadata") or {}).get("stage") == "risk_analysis":
+            status += " (risk advice)"
         print(f"{when:9} {e['correlation_id']:36}  {e['operation']:9} {e['target'][:28]:28} "
-              f"{e['execution_status']:17} {e.get('policy_id') or ''}")
+              f"{status:24} {e.get('policy_id') or ''}")
     finals: Dict[str, str] = {}
     for e in rows:
         finals[e["correlation_id"]] = e["execution_status"]
