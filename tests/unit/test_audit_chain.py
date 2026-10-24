@@ -39,3 +39,16 @@ def test_modified_inserted_or_deleted_lines_are_detected(tmp_path):
 
     path.write_text("\n".join([lines[0], '{"target": "forged"}', *lines[1:]]) + "\n", encoding="utf-8")
     assert verify_audit_chain(path)[0] is False
+
+
+def test_unchained_legacy_prefix_is_reported_but_a_stripped_chain_line_is_not_accepted(tmp_path):
+    path = tmp_path / "audit.jsonl"
+    path.write_text('{"target": "old record"}\n', encoding="utf-8")
+    write(path, 2)
+    ok, count, reason = verify_audit_chain(path)
+    assert ok and count == 2 and "1 earlier unchained" in reason
+    lines = path.read_text(encoding="utf-8").splitlines()
+    stripped = json.loads(lines[2])
+    del stripped["chain"]
+    path.write_text("\n".join([lines[0], lines[1], json.dumps(stripped)]) + "\n", encoding="utf-8")
+    assert verify_audit_chain(path)[0] is False

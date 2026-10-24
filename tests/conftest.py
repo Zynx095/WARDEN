@@ -22,6 +22,8 @@ def _hermetic_environment(monkeypatch: pytest.MonkeyPatch):
                  "WARDEN_RISK_ANALYST_TIMEOUT_SECONDS", "WARDEN_RISK_ANALYST_SEED",
                  "WARDEN_RISK_ANALYST_ALLOWED_REQUESTER", "WARDEN_RISK_ANALYST_PORT"):
         monkeypatch.delenv(name, raising=False)
+    # Never write into the repository's own logs/audit.jsonl; tests that need a log set a path.
+    monkeypatch.setenv("WARDEN_AUDIT_LOG", "")
     # The settings singleton must not carry one test's environment into the next.
     import warden.config
     monkeypatch.setattr(warden.config, "_DEFAULT_CONFIG", None)
