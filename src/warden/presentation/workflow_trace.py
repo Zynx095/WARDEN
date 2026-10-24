@@ -109,6 +109,44 @@ def stages_from_result(result: Dict[str, Any]) -> Dict[str, Stage]:
     return stages
 
 
+# Compact path wording: the stages an action actually went through, with the decisive outcome.
+_PATH_NAMES = {"intent": "Intent", "risk": "Risk", "policy": "Policy", "approval": "Approval",
+               "executor": "Executor", "auditor": "Auditor"}
+_PATH_OUTCOMES: Dict[str, Dict[str, str]] = {
+    "risk": {"UNAVAILABLE": "unavailable", "TIMED_OUT": "timed out"},
+    "policy": {"BLOCKED": "blocked", "FAILED": "refused"},
+    "approval": {"PENDING": "pending", "DONE": "approved", "REJECTED": "rejected", "EXPIRED": "expired",
+                 "FAILED": "refused"},
+    "executor": {"FAILED": "failed"},
+    "auditor": {"VERIFIED": "verified", "UNVERIFIED": "unverified", "FAILED": "failed"},
+}
+
+
+def format_trace_path(stages: Dict[str, Stage]) -> str:
+    """Compact trace for chat: the stages an action went through and how the decisive one ended,
+    e.g. ``Intent → Risk → Policy → Approval (pending) · not executed yet``.
+
+    Stages that were not configured, not needed or not reached are left out, and the path says
+    explicitly when execution never started. Plain text, no emoji.
+    """
+    def state(key: str) -> str:
+        return (stages.get(key) or _stage("NOT_REACHED"))["state"]
+
+    parts: List[str] = []
+    for key, _ in STAGES:
+        current = state(key)
+        if current in ("SKIPPED", "NOT_REACHED"):
+            continue
+        outcome = _PATH_OUTCOMES.get(key, {}).get(current)
+        if key == "policy" and current == "DONE" and state("approval") == "SKIPPED":
+            outcome = "allowed"
+        parts.append(f"{_PATH_NAMES[key]} ({outcome})" if outcome else _PATH_NAMES[key])
+    path = " → ".join(parts)
+    if state("executor") == "NOT_REACHED":
+        path += " · not executed yet" if state("approval") == "PENDING" else " · not executed"
+    return path
+
+
 def format_trace_line(stages: Dict[str, Stage]) -> str:
     """One-line trace for chat reports, e.g. ``Intent ✅ → Risk Analyst ✅ → Policy Guard 🔒 …``."""
     parts: List[str] = []

@@ -1,7 +1,12 @@
 """warden.presentation.workflow_trace: stages come only from real result fields."""
 
 from warden.models import ExecutionStatus
-from warden.presentation.workflow_trace import format_trace_line, format_workflow_trace, stages_from_result
+from warden.presentation.workflow_trace import (
+    format_trace_line,
+    format_trace_path,
+    format_workflow_trace,
+    stages_from_result,
+)
 
 RISK = {"status": "ASSESSED", "source": "remote", "risk_level": "HIGH"}
 
@@ -63,3 +68,32 @@ def test_renderers_cover_every_stage_in_order():
         < line.index("Executor") < line.index("Auditor")
     tree = format_workflow_trace(stages, "DELETE cache.tmp")
     assert tree.count("\n") == 7 and "(pending)" in tree
+
+
+def path(result):
+    return format_trace_path(stages_from_result(result))
+
+
+def test_trace_path_lists_only_stages_the_action_went_through():
+    assert path({"status": ExecutionStatus.BLOCKED, "risk": RISK}) == "Intent → Risk → Policy (blocked) · not executed"
+    assert path({"status": ExecutionStatus.AWAITING_APPROVAL}) == \
+        "Intent → Policy → Approval (pending) · not executed yet"
+    assert path({"status": ExecutionStatus.VERIFIED, "execution_attempted": True, "executed": True}) == \
+        "Intent → Policy (allowed) → Executor → Auditor (verified)"
+
+
+def test_trace_path_after_a_decision():
+    approved = {"status": ExecutionStatus.UNVERIFIED, "decided": True, "execution_attempted": True, "executed": True}
+    assert path(approved) == "Intent → Policy → Approval (approved) → Executor → Auditor (unverified)"
+    assert path({"status": ExecutionStatus.REJECTED, "decided": True}) == \
+        "Intent → Policy → Approval (rejected) · not executed"
+    assert path({"status": ExecutionStatus.FAILED, "decided": True, "error": "digest"}) == \
+        "Intent → Policy → Approval (refused) · not executed"
+    failed = {"status": ExecutionStatus.FAILED, "decided": True, "execution_attempted": True, "executed": False}
+    assert path(failed) == "Intent → Policy → Approval (approved) → Executor (failed)"
+
+
+def test_trace_path_names_an_unavailable_risk_analyst_and_uses_no_emoji():
+    text = path({"status": ExecutionStatus.BLOCKED, "risk": {"status": "UNAVAILABLE", "summary": "unavailable (timeout)"}})
+    assert text.startswith("Intent → Risk (timed out) → Policy (blocked)")
+    assert not any(ord(ch) >= 0x2500 for ch in text)  # arrows and dots only, no emoji
