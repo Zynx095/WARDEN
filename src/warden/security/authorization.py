@@ -14,7 +14,7 @@ from warden.models import (
     Decision,
     PolicyResult,
 )
-from warden.security.digest import compute_action_digest
+from warden.security.digest import compute_action_digest, digest_matches
 
 
 def _canonical_str(p: Optional[Path | str]) -> str:
@@ -28,13 +28,28 @@ class AuthorizationError(Exception):
     pass
 
 
+class PendingQueueFull(AuthorizationError):
+    """Raised when the bounded pending-approval queue has no free slot."""
+    pass
+
+
 class PendingApproval:
     """Represents an action awaiting explicit human approval."""
 
-    def __init__(self, action: Action, policy_result: PolicyResult) -> None:
+    def __init__(
+        self,
+        action: Action,
+        policy_result: PolicyResult,
+        action_digest: Optional[str] = None,
+        state_digest: Optional[str] = None,
+        expires_at: Optional[datetime] = None,
+    ) -> None:
         self.action = action
         self.policy_result = policy_result
+        self.action_digest = action_digest
+        self.state_digest = state_digest
         self.created_at = datetime.now(timezone.utc)
+        self.expires_at = expires_at
         self.is_approved = False
         self.approved_by: Optional[str] = None
         self.approved_at: Optional[datetime] = None
@@ -52,8 +67,17 @@ class AuthorizationManager:
     and guarantees actions requiring approval cannot proceed without explicit validation.
     """
 
-    def __init__(self, secret_key: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        secret_key: Optional[str] = None,
+        approval_ttl_seconds: Optional[int] = None,
+        max_pending: Optional[int] = None,
+    ) -> None:
         self.secret_key = (secret_key or get_config().secret_key).encode("utf-8")
+        self.approval_ttl_seconds = (
+            approval_ttl_seconds if approval_ttl_seconds is not None else get_config().approval_ttl_seconds
+        )
+        self.max_pending = max_pending if max_pending is not None else get_config().max_pending_approvals
         self._pending_approvals: Dict[str, PendingApproval] = {}
 
     def _compute_signature(
@@ -202,13 +226,40 @@ class AuthorizationManager:
 
         return True, None
 
-    def register_pending_approval(self, action: Action, policy_result: PolicyResult) -> str:
-        """Register an action that requires explicit approval before execution."""
-        self._pending_approvals[action.action_id] = PendingApproval(action, policy_result)
+    def purge_expired(self) -> None:
+        """Drop approvals whose validity window has ended."""
+        now = datetime.now(timezone.utc)
+        for aid in [a for a, p in self._pending_approvals.items() if p.expires_at and now > p.expires_at]:
+            del self._pending_approvals[aid]
+
+    def register_pending_approval(
+        self,
+        action: Action,
+        policy_result: PolicyResult,
+        action_digest: Optional[str] = None,
+        state_digest: Optional[str] = None,
+    ) -> str:
+        """Register an action that requires explicit approval before execution.
+
+        The queue is bounded: when it is full of live, unapproved entries the request is
+        refused rather than evicting an older one the operator may still be reviewing.
+        """
+        self.purge_expired()
+        waiting = sum(1 for p in self._pending_approvals.values() if not p.is_approved)
+        if action.action_id not in self._pending_approvals and waiting >= self.max_pending:
+            raise PendingQueueFull(f"Too many actions awaiting approval (limit {self.max_pending}).")
+        self._pending_approvals[action.action_id] = PendingApproval(
+            action,
+            policy_result,
+            action_digest=action_digest,
+            state_digest=state_digest,
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.approval_ttl_seconds),
+        )
         return action.action_id
 
     def get_pending_approval(self, action_id: str) -> Optional[PendingApproval]:
-        """Retrieve a pending approval by action_id."""
+        """Retrieve a live pending approval by action_id (expired ones are discarded)."""
+        self.purge_expired()
         return self._pending_approvals.get(action_id)
 
     def approve_pending_action(
@@ -218,14 +269,31 @@ class AuthorizationManager:
         target_canonical: Path,
         destination_canonical: Optional[Path],
         workspace_root: Path,
+        expected_digest: Optional[str] = None,
+        current_state_digest: Optional[str] = None,
     ) -> AuthorizationToken:
-        """Explicitly approve a pending action, producing a valid authorization token."""
-        pending = self._pending_approvals.get(action_id)
+        """Explicitly approve a pending action, producing a valid authorization token.
+
+        ``expected_digest`` is the digest the operator saw and echoed back; a mismatch
+        refuses the approval without consuming it. If the touched paths changed since the
+        request was recorded, the pending entry is invalidated.
+        """
+        pending = self.get_pending_approval(action_id)
         if not pending:
             raise AuthorizationError(f"No pending approval found for action_id {action_id}.")
 
         if pending.is_approved:
             raise AuthorizationError(f"Action {action_id} has already been approved.")
+
+        if expected_digest is not None:
+            if not pending.action_digest or not digest_matches(pending.action_digest, expected_digest):
+                raise AuthorizationError("Approval digest does not match the pending action; nothing was approved.")
+
+        if pending.state_digest is not None and pending.state_digest != current_state_digest:
+            del self._pending_approvals[action_id]
+            raise AuthorizationError(
+                "Target state changed since approval was requested; the request was invalidated."
+            )
 
         pending.approve(approver_id)
 
@@ -236,4 +304,5 @@ class AuthorizationManager:
             destination_canonical=destination_canonical,
             workspace_root=workspace_root,
             policy_id="WDN-004-APPROVED",
+            state_digest=pending.state_digest,
         )

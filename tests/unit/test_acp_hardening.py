@@ -41,7 +41,7 @@ def request_cleanup(handler) -> str:
     _, reply = say(handler, "clean up old.tmp", "alice")
     text = reply.content[0].text
     assert "AWAITING APPROVAL" in text
-    return re.search(r"APPROVE\s+([a-f0-9\-]+)", text).group(1)
+    return re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", text).group(1)
 
 
 def test_other_sender_cannot_approve(warden, ws):

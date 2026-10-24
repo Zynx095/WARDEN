@@ -83,7 +83,7 @@ def test_controlled_security_demonstration_workflow(demo_workspace: Workspace):
     assert "[AWAITING APPROVAL]" in reply
     assert "WDN-004" in reply
     assert "Destructive operation requires approval" in reply
-    match = re.search(r"APPROVE\s+([a-f0-9\-]+)", reply)
+    match = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply)
     assert match is not None
     pending_id = match.group(1)
 

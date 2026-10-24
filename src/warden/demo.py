@@ -108,7 +108,7 @@ def run_demo(
     step("2-3. Request: 'Clean up temporary files' -> deterministic policy evaluation")
     reply = _say(handler, "Clean up temporary files in the workspace")
     out(reply)
-    approvals = re.findall(r"APPROVE\s+([a-f0-9\-]+)", reply)
+    approvals = re.findall(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply)
     report.check(len(approvals) == len(TEMP_FILES),
                  f"each of the {len(TEMP_FILES)} temporary-file deletions is held for approval (WDN-004)")
     report.check(all((report.workspace / f).exists() for f in TEMP_FILES),

@@ -73,7 +73,7 @@ def test_destructive_action_and_subsequent_approval_via_acp(
 
     # Extract pending action_id
     import re
-    match = re.search(r"APPROVE\s+([a-f0-9\-]+)", reply_text1)
+    match = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply_text1)
     assert match is not None
     pending_id = match.group(1)
 
@@ -172,7 +172,7 @@ def test_approve_with_leading_mention(
         sender="bob",
     )
     import re
-    match = re.search(r"APPROVE\s+([a-f0-9\-]+)", rep1.content[0].text)
+    match = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", rep1.content[0].text)
     assert match is not None
     pending_id = match.group(1)
 
