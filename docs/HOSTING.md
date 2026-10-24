@@ -37,6 +37,9 @@ ASI:One ──ACP──▶ Agentverse ──HTTPS POST /submit──▶ containe
   It never returns paths, secrets or file content.
 - The remote Auditor stays off (`WARDEN_REMOTE_AUDITOR` unset) until its identity and
   transport are separately verified.
+- The Risk Analyst runs in-process by default (`WARDEN_RISK_ANALYST=local`). A separate
+  Risk Analyst or Auditor agent must be its own process (sidecar or container), never inside
+  WARDEN's process; see docs/SENTINEL_NETWORK.md.
 - Interactive Cards are on by default in hosted mode (`WARDEN_INTERACTIVE_CARDS=false` turns
   them off). Every reply leads with the plain-text report, so ASI:One's documented fallback to
   text keeps the flow usable if a card is rejected. See docs/INTERACTIVE_CARDS.md.
