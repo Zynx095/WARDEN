@@ -18,9 +18,10 @@ def test_demo_passes_and_is_repeatable(tmp_path):
     second = demo.run_demo(ws, log, out=quiet)
     assert len(first.checks) == len(second.checks) >= 10
     assert sorted(p.name for p in ws.iterdir()) == sorted(demo.KEEP_FILES + ["cleanup_report.txt"])
-    # The audit log is reset each run, so it never accumulates across runs. 22 = 19 pipeline events
-    # plus one AUTHORIZED record per human approval (the demo approves three deletions).
-    assert len(log.read_text(encoding="utf-8").splitlines()) == 22
+    # The audit log is reset each run, so it never accumulates across runs. 29 = 19 pipeline events,
+    # one AUTHORIZED record per human approval (the demo approves three deletions) and one advisory
+    # risk-analysis record for each of the seven proposed actions.
+    assert len(log.read_text(encoding="utf-8").splitlines()) == 29
 
 
 def test_demo_never_uses_network_even_if_api_key_is_set(tmp_path, monkeypatch):

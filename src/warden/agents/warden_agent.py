@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 from warden.audit.auditor import OutcomeAuditor
@@ -36,6 +36,7 @@ from warden.security.digest import (
 )
 from warden.security.path_validation import PathValidator
 from warden.security.policy import PolicyEngine
+from warden.risk.analyst import LocalRiskAnalyst, build_risk_request
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class ActionBinding:
     target_path: Path
     destination_path: Optional[Path]
     target_display: str
+    state: Dict[str, Any] = field(default_factory=dict)
 
 
 class WardenAgent:
@@ -56,6 +58,10 @@ class WardenAgent:
     2. Deterministic Authorization: Evaluating action strictly via PolicyEngine.
     3. Controlled Execution: Executing authorized actions via RestrictedExecutor.
     4. Independent Verification: Verifying physical filesystem outcome via OutcomeAuditor.
+
+    Between proposal and authorization an optional Risk Analyst adds an advisory assessment
+    (evidence and a recommendation). It is recorded and shown, and never consulted by policy,
+    approval or execution.
     """
 
     def __init__(
@@ -64,6 +70,7 @@ class WardenAgent:
         config: Optional[WardenConfig] = None,
         audit_log_file: Optional[Path] = None,
         auditor: Optional[Any] = None,
+        risk_analyst: Optional[Any] = None,
     ) -> None:
         self.config = config or get_config()
         self.workspace = workspace or Workspace(self.config.workspace_root)
@@ -80,6 +87,11 @@ class WardenAgent:
             raise ConfigError("WARDEN_REMOTE_AUDITOR is enabled but no remote auditor was supplied.")
         self.auditor = auditor or OutcomeAuditor(self.workspace, path_validator=self.path_validator)
         self.audit_logger = AuditLogger(audit_log_file)
+        if risk_analyst is None and self.config.risk_analyst == "remote":
+            raise ConfigError("WARDEN_RISK_ANALYST=remote is set but no remote Risk Analyst was supplied.")
+        if risk_analyst is None and self.config.risk_analyst == "local":
+            risk_analyst = LocalRiskAnalyst()
+        self.risk_analyst = risk_analyst
 
     def _bind(self, action: Action) -> Optional[ActionBinding]:
         """Canonicalize an action and fingerprint the paths it touches; None if it cannot be bound."""
@@ -93,26 +105,74 @@ class WardenAgent:
             if not dest_val.is_safe or not dest_val.canonical_path:
                 return None
             dest_path = dest_val.canonical_path
+        state = capture_target_state(target_val.canonical_path, dest_path)
         return ActionBinding(
             action_digest=compute_action_digest(
                 action.operation, target_val.canonical_path, dest_path, action.content, self.workspace.root_path
             ),
-            state_digest=compute_state_digest(capture_target_state(target_val.canonical_path, dest_path)),
+            state_digest=compute_state_digest(state),
             target_path=target_val.canonical_path,
             destination_path=dest_path,
             target_display=target_val.relative_path or action.target,
+            state=state,
         )
+
+    def _assess_risk(
+        self,
+        action: Action,
+        binding: Optional[ActionBinding],
+        correlation_id: str,
+        request_text: Optional[str],
+        batch_size: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Advisory risk stage. Returns the outcome as a dict, or None when no analyst is configured."""
+        if self.risk_analyst is None:
+            return None
+        request = build_risk_request(
+            action,
+            binding.action_digest if binding else None,
+            binding.target_display if binding else None,
+            binding.state if binding else None,
+            self.policy_engine.protected_files,
+            request_text=request_text,
+            batch_size=batch_size,
+        )
+        try:
+            risk = self.risk_analyst.assess(request).as_dict()
+        except Exception as exc:  # an analyst must never break the pipeline
+            risk = {"status": "UNAVAILABLE", "source": getattr(self.risk_analyst, "source", "unknown"),
+                    "action_id": action.action_id, "action_digest": request.action_digest,
+                    "summary": f"Risk analysis failed ({type(exc).__name__}); policy decision unaffected.",
+                    "findings": [], "request_id": request.request_id}
+        self.audit_logger.record(
+            AuditEvent(
+                correlation_id=correlation_id,
+                operation=action.operation,
+                target=action.target,
+                destination=action.destination,
+                execution_status=ExecutionStatus.PROPOSED,
+                metadata={"stage": "risk_analysis", "risk_status": risk["status"], "risk_source": risk["source"],
+                          "risk_level": risk.get("risk_level"), "recommendation": risk.get("recommendation"),
+                          "action_digest": risk["action_digest"], "risk_request_id": risk.get("request_id"),
+                          "finding_codes": [f.get("code") for f in risk.get("findings", [])]},
+            )
+        )
+        return risk
 
     def handle_action_request(
         self,
         action: Action,
         auto_execute_allowed: bool = True,
         authorized_approvers: Optional[Iterable[str]] = None,
+        request_text: Optional[str] = None,
+        batch_size: int = 1,
     ) -> Dict[str, Any]:
         """Process an action request through the complete verification pipeline.
 
         ``authorized_approvers``, when given, is bound into a resulting approval request: only
         those identities can later approve or reject it, whatever channel the decision uses.
+        ``request_text`` and ``batch_size`` (the instruction and how many actions it produced)
+        are context for the advisory Risk Analyst only.
         """
         correlation_id = action.correlation_id or action.action_id
 
@@ -128,7 +188,12 @@ class WardenAgent:
             )
         )
 
-        # Step 2: Deterministic Policy Evaluation
+        # Step 1b: Advisory risk analysis of the exact, canonically bound action
+        bound = self._bind(action)
+        risk = self._assess_risk(action, bound, correlation_id, request_text, batch_size)
+        extra: Dict[str, Any] = {"risk": risk} if risk is not None else {}
+
+        # Step 2: Deterministic Policy Evaluation (the risk assessment is not an input)
         policy_result: PolicyResult = self.policy_engine.evaluate(action)
 
         # Handle BLOCKED decisions
@@ -155,13 +220,15 @@ class WardenAgent:
                 "executed": False,
                 "verified": False,
                 **self._describe(action, None),
+                **extra,
             }
 
         # Handle REQUIRE_APPROVAL decisions
         if policy_result.decision == Decision.REQUIRE_APPROVAL:
-            binding = self._bind(action)
+            binding = bound
             if binding is None:
-                return self._refuse(action, correlation_id, "Action could not be canonically bound; no approval was requested.")
+                return {**self._refuse(action, correlation_id,
+                                       "Action could not be canonically bound; no approval was requested."), **extra}
             try:
                 pending_id = self.auth_manager.register_pending_approval(
                     action,
@@ -169,9 +236,10 @@ class WardenAgent:
                     action_digest=binding.action_digest,
                     state_digest=binding.state_digest,
                     authorized_approvers=authorized_approvers,
+                    risk=risk,
                 )
             except PendingQueueFull as exc:
-                return self._refuse(action, correlation_id, str(exc))
+                return {**self._refuse(action, correlation_id, str(exc)), **extra}
             pending = self.auth_manager.get_pending_approval(pending_id)
             self.audit_logger.record(
                 AuditEvent(
@@ -201,12 +269,14 @@ class WardenAgent:
                 "expires_at": pending.expires_at.isoformat() if pending and pending.expires_at else None,
                 "executed": False,
                 "verified": False,
+                **extra,
             }
 
         # Step 3: Authorization Grant
-        binding = self._bind(action)
+        binding = bound
         if binding is None:
-            return self._refuse(action, correlation_id, "Action could not be canonically bound; nothing was authorized.")
+            return {**self._refuse(action, correlation_id,
+                                   "Action could not be canonically bound; nothing was authorized."), **extra}
         auth_token = self.auth_manager.issue_token(
             action=action,
             target_canonical=binding.target_path,
@@ -238,6 +308,7 @@ class WardenAgent:
                 "auth_token": auth_token,
                 "executed": False,
                 "verified": False,
+                **extra,
             }
 
         # Step 4: Controlled Execution (pre-execution evidence is captured first so the
@@ -264,6 +335,8 @@ class WardenAgent:
                 "error": exec_result.error,
                 "executed": False,
                 "verified": False,
+                **self._describe(action, binding),
+                **extra,
             }
 
         # Step 5: Independent Outcome Verification
@@ -297,6 +370,7 @@ class WardenAgent:
             "verification_details": verification.details,
             "observed_state": verification.observed_state,
             **self._describe(action, binding),
+            **extra,
         }
 
     @staticmethod
@@ -363,7 +437,7 @@ class WardenAgent:
                 current_state_digest=binding.state_digest,
             )
         except AuthorizationError as exc:
-            return {**self._refuse(action, correlation_id, str(exc)), **self._describe(action, binding)}
+            return {**self._refuse(action, correlation_id, str(exc)), **self._describe(action, binding), **self._risk_of(pending)}
 
         self.audit_logger.record(
             AuditEvent(
@@ -404,6 +478,7 @@ class WardenAgent:
                 "executed": False,
                 "verified": False,
                 **self._describe(action, binding),
+                **self._risk_of(pending),
             }
 
         verification = self.auditor.verify_outcome(action, exec_result, pre_state)
@@ -436,6 +511,7 @@ class WardenAgent:
             "verification_details": verification.details,
             "observed_state": verification.observed_state,
             **self._describe(action, binding),
+            **self._risk_of(pending),
         }
 
     def reject_pending(
@@ -473,7 +549,14 @@ class WardenAgent:
             "executed": False,
             "verified": False,
             **self._describe(action, None),
+            **self._risk_of(pending),
         }
+
+    @staticmethod
+    def _risk_of(pending: Any) -> Dict[str, Any]:
+        """The advisory assessment recorded with a pending request, for the decision's result."""
+        risk = getattr(pending, "risk", None)
+        return {"risk": risk} if risk is not None else {}
 
     @staticmethod
     def _describe(action: Action, binding: Optional[ActionBinding]) -> Dict[str, Any]:

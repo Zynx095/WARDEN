@@ -8,7 +8,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, FrozenSet, Iterable, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, Optional, Tuple
 from warden.config import get_config
 from warden.models import (
     Action,
@@ -78,6 +78,7 @@ class PendingApproval:
         state_digest: Optional[str] = None,
         expires_at: Optional[datetime] = None,
         authorized_approvers: Optional[Iterable[str]] = None,
+        risk: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.action = action
         self.policy_result = policy_result
@@ -89,6 +90,8 @@ class PendingApproval:
         self.authorized_approvers: Optional[FrozenSet[str]] = (
             frozenset(a for a in authorized_approvers if a) if authorized_approvers is not None else None
         )
+        # Advisory Risk Analyst outcome for this exact digest; display and audit only.
+        self.risk = dict(risk) if risk is not None else None
         self.is_approved = False
         self.approved_by: Optional[str] = None
         self.approved_at: Optional[datetime] = None
@@ -304,6 +307,7 @@ class AuthorizationManager:
         action_digest: Optional[str] = None,
         state_digest: Optional[str] = None,
         authorized_approvers: Optional[Iterable[str]] = None,
+        risk: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Register an action that requires explicit approval before execution.
 
@@ -322,6 +326,7 @@ class AuthorizationManager:
             state_digest=state_digest,
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=self.approval_ttl_seconds),
             authorized_approvers=authorized_approvers,
+            risk=risk,
         )
         return action.action_id
 
