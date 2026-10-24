@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from warden.security.digest import (
+    canonical_path_str,
     capture_target_state,
     compute_action_digest,
     compute_state_digest,
@@ -62,3 +63,17 @@ def test_digest_matches_requires_long_prefix(tmp_path):
     assert not digest_matches(d, d[:15])
     assert not digest_matches(d, "")
     assert not digest_matches(d, "0" * 16)
+
+
+def test_canonical_path_str_platform_casing(tmp_path, monkeypatch):
+    test_path = tmp_path / "SubDir" / "MixedCaseFile.TXT"
+    resolved_str = str(test_path.resolve())
+
+    # On Windows, canonical paths are case-folded to lower
+    monkeypatch.setattr("sys.platform", "win32")
+    assert canonical_path_str(test_path) == resolved_str.lower()
+
+    # On Linux / POSIX, canonical paths preserve case
+    monkeypatch.setattr("sys.platform", "linux")
+    assert canonical_path_str(test_path) == resolved_str
+
