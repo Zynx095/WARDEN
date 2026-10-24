@@ -197,14 +197,11 @@ def build_warden_agent(
     agent_seed = validate_seed(seed or os.getenv("AGENT_SEED"))
 
     use_mailbox = mailbox
-    if (mailbox_key or os.getenv("AGENTVERSE_MAILBOX_KEY") or "").strip():
-        # uAgents 0.26.1 has no mailbox-key parameter: a value here selects mailbox mode only.
+    api_token = (mailbox_key or os.getenv("AGENTVERSE_API_KEY") or os.getenv("AGENTVERSE_MAILBOX_KEY") or "").strip()
+    if api_token or os.getenv("AGENTVERSE_MAILBOX_KEY"):
         use_mailbox = True
-        logger.warning(
-            "AGENTVERSE_MAILBOX_KEY is not consumed by uAgents %s; it only selects mailbox mode. "
-            "Mailbox provisioning is done by connecting through the local agent inspector.",
-            _sdk_version(),
-        )
+
+    effective_endpoint = None if use_mailbox else endpoint
 
     agent_desc = description if description is not None else os.getenv("AGENTVERSE_DESCRIPTION")
     agent_readme = readme_path if readme_path is not None else os.getenv("AGENTVERSE_README_PATH")
@@ -224,16 +221,28 @@ def build_warden_agent(
         name=agent_name,
         seed=agent_seed,
         port=port,
-        endpoint=endpoint,
+        endpoint=effective_endpoint,
         mailbox=use_mailbox,
         resolve=resolver,
         loop=loop or _ensure_event_loop(),
         # Telemetry is only meaningful once registered on Agentverse; keep local mode quiet.
-        report_events=bool(use_mailbox or endpoint),
+        report_events=bool(use_mailbox or effective_endpoint),
         description=agent_desc,
         readme_path=agent_readme,
         enable_agent_inspector=enable_agent_inspector,
     )
+    if use_mailbox and api_token:
+        @agent.on_event("startup")
+        async def _connect_agentverse_mailbox() -> None:
+            try:
+                from warden.hosting.server import ensure_agentverse_mailbox
+                success = await ensure_agentverse_mailbox(agent, api_token)
+                if success:
+                    logger.info("[WARDEN] Mailbox registration challenge verified on Agentverse.")
+                else:
+                    logger.warning("[WARDEN] Mailbox challenge returned unsuccessful status.")
+            except Exception as e:
+                logger.warning("[WARDEN] Mailbox auto-registration note: %s", e)
     agent.include(
         create_acp_protocol(warden=warden_core, interactive_cards=interactive_cards,
                             approval_mode=cfg.approval_mode),

@@ -13,6 +13,7 @@ from warden.config import APPROVAL_MODES, ConfigError, env_bool, env_int, resolv
 
 DEFAULT_HOSTED_WORKSPACE = "./hosted_workspace"
 DEFAULT_AGENT_NAME = "warden-verification-agent"
+AGENTVERSE_MAILBOX_ENDPOINT = "https://agentverse.ai/v2/agents/mailbox/submit"
 
 
 def _port() -> int:
@@ -72,6 +73,11 @@ class HostedConfig(BaseModel):
     )
     # ASI:One Interactive Cards are on by default when hosted; every reply still leads with plain text.
     interactive_cards: bool = Field(default_factory=lambda: env_bool("WARDEN_INTERACTIVE_CARDS", True))
+    # Agentverse mailbox (Mailman) mode: receives messages via polling instead of direct webhook.
+    use_mailbox: bool = Field(
+        default_factory=lambda: env_bool("WARDEN_USE_MAILBOX", False)
+        or bool((os.getenv("AGENTVERSE_MAILBOX_KEY") or "").strip())
+    )
     description: str = Field(default_factory=lambda: (os.getenv("AGENTVERSE_DESCRIPTION") or
         "Action-security agent: deterministic policy, exact-action approval and independent "
         "verification for file actions in a synthetic demo workspace.").strip())
@@ -80,8 +86,11 @@ class HostedConfig(BaseModel):
     def __init__(self, **data) -> None:
         super().__init__(**data)
         if not self.public_endpoint:
+            raw_ep = os.getenv("WARDEN_PUBLIC_ENDPOINT")
+            if not raw_ep and self.use_mailbox:
+                raw_ep = AGENTVERSE_MAILBOX_ENDPOINT
             self.public_endpoint = validate_public_endpoint(
-                os.getenv("WARDEN_PUBLIC_ENDPOINT"), self.allow_insecure_endpoint
+                raw_ep, self.allow_insecure_endpoint
             )
         else:
             self.public_endpoint = validate_public_endpoint(self.public_endpoint, self.allow_insecure_endpoint)

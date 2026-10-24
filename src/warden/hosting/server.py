@@ -40,6 +40,35 @@ class HealthResponse(Model):
     approval_mode: str
     durable_state: bool
     risk_analyst: str
+    mailbox: bool = False
+
+
+async def ensure_agentverse_mailbox(agent: Agent, api_key: str) -> bool:
+    """Connect and provision the mailbox on Agentverse if an API key is provided."""
+    from uagents.mailbox import AgentverseConnectRequest, register_in_agentverse
+    from uagents_core.types import AgentType
+    from uagents_core.registration import RegistrationRequest
+
+    profile = agent._build_registration_profile()
+    reg_data = RegistrationRequest(
+        address=agent.address,
+        name=agent.name,
+        handle=agent._handle,
+        url=None,
+        profile=profile,
+        endpoints=agent._endpoints,
+        protocols=list(agent.protocols.keys()),
+        metadata=agent.metadata,
+    )
+    req = AgentverseConnectRequest(user_token=api_key.strip(), agent_type=AgentType.MAILBOX)
+    resp = await register_in_agentverse(
+        request=req,
+        identity=agent._identity,
+        prefix=agent._prefix,
+        agentverse=agent._agentverse,
+        agent_details=reg_data,
+    )
+    return resp.success
 
 
 def build_hosted_agent(
@@ -57,8 +86,8 @@ def build_hosted_agent(
         name=cfg.agent_name,
         seed=agent_seed,
         port=cfg.port,
-        mailbox=False,
-        endpoint=[cfg.public_endpoint],
+        mailbox=cfg.use_mailbox,
+        endpoint=None if cfg.use_mailbox else [cfg.public_endpoint],
         workspace_dir=workspace_root,
         publish_manifest=True,
         description=cfg.description,
@@ -75,6 +104,19 @@ def build_hosted_agent(
     scheme = cfg.public_endpoint.split(":", 1)[0]
     remote_auditor = core.remote_auditor
 
+    api_key = (os.getenv("AGENTVERSE_API_KEY") or os.getenv("AGENTVERSE_MAILBOX_KEY") or "").strip()
+    if cfg.use_mailbox and api_key:
+        @agent.on_event("startup")
+        async def _connect_mailbox_startup(ctx: Context):
+            try:
+                ok = await ensure_agentverse_mailbox(agent, api_key)
+                if ok:
+                    ctx.logger.info("Agentverse mailbox provisioned and connected successfully.")
+                else:
+                    ctx.logger.warning("Agentverse mailbox provisioning returned False; check API key.")
+            except Exception as exc:
+                ctx.logger.warning("Could not auto-provision mailbox: %s", exc)
+
     @agent.on_rest_get(HEALTH_ROUTE, HealthResponse)
     async def health(ctx: Context) -> HealthResponse:
         ready = is_demo_workspace(workspace_root)
@@ -88,6 +130,7 @@ def build_hosted_agent(
             approval_mode=core.approval_mode,
             durable_state=core.state_db is not None,
             risk_analyst=core.risk_analyst,
+            mailbox=bool(agent._use_mailbox),
         )
 
     return agent
@@ -112,6 +155,7 @@ def main() -> int:
         return 1
 
     print(f"[STARTING] WARDEN hosted agent {agent.address}")
+    print(f"  Mode:      {'mailbox (Agentverse Mailman)' if cfg.use_mailbox else 'external-endpoint'}")
     print(f"  Endpoint:  {cfg.public_endpoint}")
     print(f"  Listening: 0.0.0.0:{cfg.port}  (health: {HEALTH_ROUTE})")
     print("  Workspace: synthetic demo workspace (fixtures only)")

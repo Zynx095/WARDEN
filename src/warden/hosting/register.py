@@ -47,12 +47,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="Validate and print the profile; send nothing")
     mode.add_argument("--confirm", action="store_true", help="Actually publish the registration to Agentverse")
+    parser.add_argument("--mailbox", action="store_true", help="Register as an Agentverse Mailbox (Mailman) agent")
     parser.add_argument("--readme", type=Path, default=None, help="README to publish (default docs/AGENTVERSE_README.md)")
     args = parser.parse_args(argv)
 
     load_environment()
     try:
-        cfg = HostedConfig()
+        cfg = HostedConfig(use_mailbox=True) if args.mailbox else HostedConfig()
         if cfg.public_endpoint.startswith("http://"):
             raise ConfigError("Refusing to register a plain-http endpoint; Agentverse needs a public https URL.")
         seed = validate_seed(os.getenv("AGENT_SEED"))
@@ -95,6 +96,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     except AgentverseRequestError as exc:
         print(f"[REGISTRATION FAILED] {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
+    if cfg.use_mailbox:
+        print("Provisioning Agentverse mailbox access challenge...")
+        import asyncio
+        from uagents import Agent
+        from warden.hosting.server import ensure_agentverse_mailbox
+        temp_agent = Agent(name=registration["name"], seed=seed, mailbox=True)
+        try:
+            ok = asyncio.run(ensure_agentverse_mailbox(temp_agent, api_key))
+            if ok:
+                print("Mailbox access challenge proved and verified on Agentverse.")
+            else:
+                print("[NOTE] Mailbox registration requested; agent will connect to mailbox on start.")
+        except Exception as exc:
+            print(f"[NOTE] Mailbox provisioning will complete on agent startup: {exc}")
+
     print("Registered on Agentverse. Verify the profile and test it from ASI:One before announcing it.")
     return 0
 
