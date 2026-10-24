@@ -21,11 +21,12 @@ from typing import Any, Callable, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-RISK_REQUEST_SCHEMA = "warden.risk.request.v1"
-RISK_ASSESSMENT_SCHEMA = "warden.risk.assessment.v1"
+RISK_REQUEST_SCHEMA = "warden.risk.request.v2"
+RISK_ASSESSMENT_SCHEMA = "warden.risk.assessment.v2"
 
 RiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
-Recommendation = Literal["PROCEED", "REVIEW", "DO_NOT_PROCEED"]
+# Candidates only: the deterministic policy engine makes every decision.
+Recommendation = Literal["ALLOW_CANDIDATE", "ESCALATE", "BLOCK_CANDIDATE"]
 Severity = Literal["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 Uncertainty = Literal["LOW", "MEDIUM", "HIGH"]
 FindingCode = Literal[
@@ -37,11 +38,17 @@ FindingCode = Literal[
     "AMBIGUOUS_REQUEST",
     "AUTHORITY_CLAIM",
     "UNCERTAIN_STATE",
+    "PATH_TRAVERSAL",
+    "SYMLINK_TARGET",
+    "OVERWRITE",
+    "CONTENT_INJECTION",
+    "COLLATERAL_EFFECT",
 ]
 
 MAX_FINDINGS = 16
 MAX_EVIDENCE_CHARS = 200
 MAX_REQUEST_TEXT_CHARS = 4000
+MAX_CONTENT_PREVIEW_CHARS = 2000
 CLOCK_SKEW = timedelta(seconds=30)
 
 
@@ -53,12 +60,16 @@ class RiskRequest(BaseModel):
     request_id: str
     nonce: str
     action_id: str                        # correlates every stage of one action
+    correlation_id: str                   # audit correlation id (the action id unless set upstream)
     action_digest: str                    # canonical digest; '' when the action cannot be bound
     operation: str
     target: str                           # workspace-relative when bound, else as requested
+    requested_target: str = ""            # the target exactly as proposed (before canonicalisation)
     destination: Optional[str] = None
     content_sha256: Optional[str] = None
     content_length: Optional[int] = None
+    # Start of the content the action would write (user-supplied, never a file that was read).
+    content_preview: Optional[str] = Field(default=None, max_length=MAX_CONTENT_PREVIEW_CHARS)
     target_state: Optional[Dict[str, Any]] = None       # describe_path_state(); None when unbound
     destination_state: Optional[Dict[str, Any]] = None
     request_text: str = Field(default="", max_length=MAX_REQUEST_TEXT_CHARS)
@@ -84,6 +95,7 @@ class RiskAssessment(BaseModel):
     request_id: str
     nonce: str
     action_id: str
+    correlation_id: str
     action_digest: str
     analyst_address: str
     risk_level: RiskLevel
@@ -146,7 +158,7 @@ def check_assessment(
             return AssessmentCheck(False, "Assessment signer is not the trusted Risk Analyst.")
         if not assessment.signature:
             return AssessmentCheck(False, "Assessment is unsigned.")
-        for name in ("request_id", "nonce", "action_id", "action_digest"):
+        for name in ("request_id", "nonce", "action_id", "correlation_id", "action_digest"):
             if getattr(assessment, name) != getattr(request, name):
                 return AssessmentCheck(False, f"Assessment {name} does not match the request.")
         now = now or datetime.now(timezone.utc)
@@ -187,6 +199,8 @@ class RiskOutcome:
     summary: str = ""
     analyst_address: Optional[str] = None
     request_id: Optional[str] = None
+    correlation_id: Optional[str] = None
+    assessed_at: Optional[str] = None
 
     @classmethod
     def from_assessment(cls, assessment: RiskAssessment, source: str) -> "RiskOutcome":
@@ -202,12 +216,15 @@ class RiskOutcome:
             summary=assessment.summary,
             analyst_address=assessment.analyst_address or None,
             request_id=assessment.request_id,
+            correlation_id=assessment.correlation_id,
+            assessed_at=assessment.assessed_at,
         )
 
     @classmethod
     def unavailable(cls, request: RiskRequest, source: str, reason: str) -> "RiskOutcome":
         return cls(status=UNAVAILABLE, source=source, action_id=request.action_id,
-                   action_digest=request.action_digest, summary=reason[:300], request_id=request.request_id)
+                   action_digest=request.action_digest, summary=reason[:300], request_id=request.request_id,
+                   correlation_id=request.correlation_id)
 
     def as_dict(self) -> Dict[str, Any]:
         """Display/audit form. Advisory only: never read by policy, approval or execution."""
@@ -223,4 +240,6 @@ class RiskOutcome:
             "summary": self.summary,
             "analyst_address": self.analyst_address,
             "request_id": self.request_id,
+            "correlation_id": self.correlation_id,
+            "assessed_at": self.assessed_at,
         }

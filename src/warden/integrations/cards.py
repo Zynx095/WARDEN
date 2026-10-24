@@ -111,7 +111,8 @@ def _expiry_text(expires_at: Optional[str], now: Optional[datetime] = None) -> s
     return f"in {minutes} min ({when.astimezone(timezone.utc).strftime('%H:%M UTC')})"
 
 
-RECOMMENDATION_TEXT = {"PROCEED": "no concerns", "REVIEW": "review carefully", "DO_NOT_PROCEED": "advises against"}
+RECOMMENDATION_TEXT = {"ALLOW_CANDIDATE": "no concerns", "ESCALATE": "review carefully",
+                       "BLOCK_CANDIDATE": "advises against"}
 
 
 def risk_text(result: Dict[str, Any], limit: int = 160) -> str:
