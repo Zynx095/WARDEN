@@ -20,6 +20,7 @@ from uagents_core.contrib.protocols.chat import (
     TextContent,
     chat_protocol_spec,
 )
+from warden.agents.intent_agent import IntentAgent
 from warden.agents.intent_engine import IntentEngine
 from warden.agents.warden_agent import WardenAgent
 from warden.config import ConfigError, env_bool, get_config
@@ -72,6 +73,7 @@ class WardenACPHandler:
     ) -> None:
         self.warden = warden
         self.intent_engine = intent_engine or IntentEngine()
+        self.intent_agent = IntentAgent(self.intent_engine)
         # ASI:One Interactive Cards (presentation only). Off unless enabled; the hosted entry point enables it.
         self.interactive_cards = (
             interactive_cards if interactive_cards is not None else env_bool("WARDEN_INTERACTIVE_CARDS", False)
@@ -225,7 +227,10 @@ class WardenACPHandler:
                 pass
 
         context = {"available_files": available_files, "sender": sender}
-        proposed_actions = self.intent_engine.parse_intent(user_text, context=context)
+        batch = self.intent_agent.propose(user_text, context=context)
+        proposed_actions = batch.actions
+        if batch.rejected:
+            logger.warning("Dropped %d invalid proposal(s) for a request from %s", len(batch.rejected), sender[:16])
 
         if not proposed_actions:
             # The user's text is echoed sanitized and bounded, never raw.
@@ -235,13 +240,14 @@ class WardenACPHandler:
         results: List[Dict[str, Any]] = []
         self._prune_approval_owners()
         independent = self.approval_mode == "independent"
-        for action in proposed_actions:
+        for action, proposal in zip(proposed_actions, batch.proposals):
             # Bind who may decide into the pending record itself, so every decision channel is held to it.
             res = self.warden.handle_action_request(
                 action,
                 authorized_approvers=set(self.approvers) if independent else {sender} | self.approvers,
                 request_text=user_text, batch_size=len(proposed_actions),
                 requester=sender, independent_approval=independent,
+                proposal=proposal.audit_metadata(),
             )
             if res.get("status") == ExecutionStatus.AWAITING_APPROVAL:
                 self._approval_owners[res.get("pending_id", action.action_id)] = sender
