@@ -40,29 +40,29 @@ def command(text):
 def test_1_harmless_permitted_action_is_verified(root):
     _, h = make(root)
     reply = say(h, "read README.txt")
-    assert "[VERIFIED]" in reply and "synthetic test data" in reply
+    assert "✅ VERIFIED" in reply and "synthetic test data" in reply
     created = say(h, "create notes.txt")
-    assert "[VERIFIED]" in created and "exact expected content" in created
+    assert "✅ VERIFIED" in created and "exact expected content" in created
     assert (root / "notes.txt").is_file()
 
 
 def test_2_protected_file_is_blocked(root):
     _, h = make(root)
     reply = say(h, "delete production.env")
-    assert "[BLOCKED]" in reply and "WDN-003" in reply
+    assert "🚫 BLOCKED" in reply and "WDN-003" in reply
     assert (root / "production.env").is_file()
 
 
 def test_protected_file_contents_are_never_returned(root):
     _, h = make(root)
     reply = say(h, "read production.env")
-    assert "[BLOCKED]" in reply and "DEMO_ONLY_PLACEHOLDER" not in reply
+    assert "🚫 BLOCKED" in reply and "DEMO_ONLY_PLACEHOLDER" not in reply
 
 
 def test_3_risky_action_requires_approval(root):
     _, h = make(root)
     reply = say(h, "delete cache.tmp")
-    assert "[AWAITING APPROVAL]" in reply and "**Target:** `cache.tmp`" in reply
+    assert "🔒 AWAITING APPROVAL" in reply and "`cache.tmp`" in reply
     assert (root / "cache.tmp").is_file()
 
 
@@ -103,7 +103,7 @@ def test_7_execution_failure_is_reported_honestly(root, monkeypatch):
     monkeypatch.setattr(warden.executor, "execute", lambda r: ExecutionResult(
         action=r.action, status=ExecutionStatus.FAILED, success=False, error="simulated disk failure"))
     reply = say(h, f"APPROVE {action_id} {digest}")
-    assert "Failed" in reply and "simulated disk failure" in reply and "VERIFIED" not in reply
+    assert "No success is claimed" in reply and "simulated disk failure" in reply and "VERIFIED" not in reply
 
 
 def test_8_local_only_mode_works_when_remote_auditor_is_disabled(root):

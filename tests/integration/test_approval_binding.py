@@ -49,8 +49,8 @@ def command_of(text) -> tuple:
 
 def test_prompt_shows_full_action_and_digest(handler):
     text = request_delete(handler)
-    assert "**Operation:** `DELETE`" in text
-    assert "**Target:** `old.tmp`" in text
+    assert "`DELETE` `old.tmp`" in text
+    assert "`old.tmp`" in text
     assert "**Action digest:**" in text
     assert "**Expires:**" in text
     _, digest = command_of(text)

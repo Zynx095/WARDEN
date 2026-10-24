@@ -284,6 +284,7 @@ class WardenAgent:
                 "destination": action.destination,
                 "content_sha256": sha256_text(action.content) if action.content is not None else None,
                 "action_digest": binding.action_digest,
+                "independent_approval": bool(independent_approval),
                 "expires_at": pending.expires_at.isoformat() if pending and pending.expires_at else None,
                 "executed": False,
                 "verified": False,
@@ -352,6 +353,7 @@ class WardenAgent:
                 "status": ExecutionStatus.FAILED,
                 "error": exec_result.error,
                 "executed": False,
+                "execution_attempted": True,
                 "verified": False,
                 **self._describe(action, binding),
                 **extra,
@@ -383,6 +385,7 @@ class WardenAgent:
             "correlation_id": correlation_id,
             "status": final_status,
             "executed": True,
+            "execution_attempted": True,
             "verified": verification.verified,
             "output": exec_result.output,
             "verification_details": verification.details,
@@ -422,6 +425,18 @@ class WardenAgent:
         }
 
     def approve_and_execute(
+        self,
+        action_id: str,
+        approver_id: str,
+        expected_digest: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Approve a pending action and execute it through verification (see ``_approve_and_execute``).
+
+        The result is marked ``decided`` so reports can tell a decision apart from a new request.
+        """
+        return {**self._approve_and_execute(action_id, approver_id, expected_digest), "decided": True}
+
+    def _approve_and_execute(
         self,
         action_id: str,
         approver_id: str,
@@ -505,6 +520,7 @@ class WardenAgent:
                 "status": ExecutionStatus.FAILED,
                 "error": exec_result.error,
                 "executed": False,
+                "execution_attempted": True,
                 "verified": False,
                 **self._describe(action, binding),
                 **self._risk_of(pending),
@@ -536,6 +552,7 @@ class WardenAgent:
             "correlation_id": correlation_id,
             "status": final_status,
             "executed": True,
+            "execution_attempted": True,
             "verified": verification.verified,
             "output": exec_result.output,
             "verification_details": verification.details,
@@ -545,6 +562,15 @@ class WardenAgent:
         }
 
     def reject_pending(
+        self,
+        action_id: str,
+        approver_id: str,
+        expected_digest: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Reject a pending action (see ``_reject_pending``); the result is marked ``decided``."""
+        return {**self._reject_pending(action_id, approver_id, expected_digest), "decided": True}
+
+    def _reject_pending(
         self,
         action_id: str,
         approver_id: str,

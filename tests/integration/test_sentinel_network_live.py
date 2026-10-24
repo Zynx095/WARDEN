@@ -190,12 +190,12 @@ def run_network(cfg, hosted, warden_id, analyst_id, client_id, warden_port, clie
 
     # 1. Protected target: the analyst says CRITICAL, policy blocks; nothing is touched.
     text, cards = ask("delete production.env")
-    assert "[BLOCKED]" in text and "CRITICAL" in text
+    assert "🚫 BLOCKED" in text and "CRITICAL" in text
     assert (cfg.workspace_root / "production.env").is_file()
 
     # 2. Destructive request: remote assessment, then approval required; nothing runs yet.
     text, (review,) = ask("delete debug.log")
-    assert "[AWAITING APPROVAL]" in text and (cfg.workspace_root / "debug.log").is_file()
+    assert "🔒 AWAITING APPROVAL" in text and (cfg.workspace_root / "debug.log").is_file()
     payload = json.loads(review["card_payload"])
     rows = {r["label"]: r["value"] for r in payload["summary_rows"]}
     assert rows["Risk (advisory)"].startswith("HIGH") and "debug.log" in rows["Risk (advisory)"]
