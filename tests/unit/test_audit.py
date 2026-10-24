@@ -59,6 +59,7 @@ def test_outcome_verification_create_success(
     workspace_fixture: Workspace,
 ):
     action = Action(operation="CREATE", target="new_doc.txt", content="audit verified content")
+    pre = auditor.capture_pre_state(action)
     # Actually create file on disk to simulate executor result
     workspace_fixture.create_synthetic_file("new_doc.txt", "audit verified content")
 
@@ -68,7 +69,7 @@ def test_outcome_verification_create_success(
         success=True,
     )
 
-    verification = auditor.verify_outcome(action, exec_result)
+    verification = auditor.verify_outcome(action, exec_result, pre)
     assert verification.status == ExecutionStatus.VERIFIED
     assert verification.verified is True
     assert verification.observed_state.get("content_matched") is True
@@ -79,6 +80,7 @@ def test_outcome_verification_create_content_mismatch_fails(
     workspace_fixture: Workspace,
 ):
     action = Action(operation="CREATE", target="new_doc.txt", content="expected content")
+    pre = auditor.capture_pre_state(action)
     # Simulate attacker or faulty executor writing different content
     workspace_fixture.create_synthetic_file("new_doc.txt", "tampered content")
 
@@ -88,7 +90,7 @@ def test_outcome_verification_create_content_mismatch_fails(
         success=True,
     )
 
-    verification = auditor.verify_outcome(action, exec_result)
+    verification = auditor.verify_outcome(action, exec_result, pre)
     assert verification.status == ExecutionStatus.FAILED
     assert verification.verified is False
     assert "does not match" in verification.details
@@ -99,14 +101,16 @@ def test_outcome_verification_delete_success(
     workspace_fixture: Workspace,
 ):
     action = Action(operation="DELETE", target="obsolete.log")
-    # File does NOT exist on disk
+    workspace_fixture.create_synthetic_file("obsolete.log", "stale")
+    pre = auditor.capture_pre_state(action)
+    (workspace_fixture.root_path / "obsolete.log").unlink()
     exec_result = ExecutionResult(
         action=action,
         status=ExecutionStatus.EXECUTED,
         success=True,
     )
 
-    verification = auditor.verify_outcome(action, exec_result)
+    verification = auditor.verify_outcome(action, exec_result, pre)
     assert verification.status == ExecutionStatus.VERIFIED
     assert verification.verified is True
 
@@ -118,6 +122,7 @@ def test_outcome_verification_delete_still_exists_fails(
     action = Action(operation="DELETE", target="surviving.log")
     # File still exists on disk despite executor claiming success
     workspace_fixture.create_synthetic_file("surviving.log", "I survived!")
+    pre = auditor.capture_pre_state(action)
 
     exec_result = ExecutionResult(
         action=action,
@@ -125,7 +130,7 @@ def test_outcome_verification_delete_still_exists_fails(
         success=True,
     )
 
-    verification = auditor.verify_outcome(action, exec_result)
+    verification = auditor.verify_outcome(action, exec_result, pre)
     assert verification.status == ExecutionStatus.FAILED
     assert verification.verified is False
     assert "still exists" in verification.details
@@ -136,7 +141,9 @@ def test_outcome_verification_rename_success(
     workspace_fixture: Workspace,
 ):
     action = Action(operation="RENAME", target="src.txt", destination="dst.txt")
-    workspace_fixture.create_synthetic_file("dst.txt", "moved")
+    workspace_fixture.create_synthetic_file("src.txt", "moved")
+    pre = auditor.capture_pre_state(action)
+    (workspace_fixture.root_path / "src.txt").rename(workspace_fixture.root_path / "dst.txt")
 
     exec_result = ExecutionResult(
         action=action,
@@ -144,7 +151,7 @@ def test_outcome_verification_rename_success(
         success=True,
     )
 
-    verification = auditor.verify_outcome(action, exec_result)
+    verification = auditor.verify_outcome(action, exec_result, pre)
     assert verification.status == ExecutionStatus.VERIFIED
     assert verification.verified is True
 

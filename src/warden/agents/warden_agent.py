@@ -224,7 +224,9 @@ class WardenAgent:
                 "verified": False,
             }
 
-        # Step 4: Controlled Execution
+        # Step 4: Controlled Execution (pre-execution evidence is captured first so the
+        # auditor can later establish what actually changed)
+        pre_state = self.auditor.capture_pre_state(action)
         exec_request = ExecutionRequest(action=action, authorization=auth_token)
         exec_result: ExecutionResult = self.executor.execute(exec_request)
 
@@ -249,7 +251,7 @@ class WardenAgent:
             }
 
         # Step 5: Independent Outcome Verification
-        verification: VerificationResult = self.auditor.verify_outcome(action, exec_result)
+        verification: VerificationResult = self.auditor.verify_outcome(action, exec_result, pre_state)
 
         final_status = (
             ExecutionStatus.VERIFIED if verification.verified else ExecutionStatus.FAILED
@@ -263,7 +265,11 @@ class WardenAgent:
                 destination=action.destination,
                 execution_status=final_status,
                 verification_status="VERIFIED" if verification.verified else "FAILED",
-                metadata={"details": verification.details, "observed": verification.observed_state},
+                metadata={
+                    "action_digest": binding.action_digest,
+                    "details": verification.details,
+                    "observed": verification.observed_state,
+                },
             )
         )
 
@@ -341,6 +347,7 @@ class WardenAgent:
             return self._refuse(action, correlation_id, str(exc))
 
         # Execute approved action
+        pre_state = self.auditor.capture_pre_state(action)
         exec_request = ExecutionRequest(action=action, authorization=auth_token)
         exec_result = self.executor.execute(exec_request)
 
@@ -354,7 +361,7 @@ class WardenAgent:
                 "verified": False,
             }
 
-        verification = self.auditor.verify_outcome(action, exec_result)
+        verification = self.auditor.verify_outcome(action, exec_result, pre_state)
         final_status = (
             ExecutionStatus.VERIFIED if verification.verified else ExecutionStatus.FAILED
         )
@@ -369,6 +376,7 @@ class WardenAgent:
                 verification_status="VERIFIED" if verification.verified else "FAILED",
                 metadata={
                     "approved_by": approver_id,
+                    "action_digest": binding.action_digest,
                     "details": verification.details,
                     "observed": verification.observed_state,
                 },
