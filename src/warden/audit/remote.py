@@ -14,8 +14,6 @@ Invariants:
 from __future__ import annotations
 
 import logging
-import queue
-import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
@@ -23,6 +21,7 @@ from warden.audit.attestation import AuditRequest, check_attestation
 from warden.audit.auditor import MUTATING_OPERATIONS, OutcomeAuditor
 from warden.audit.request_builder import AuditRequestError, build_audit_request
 from warden.execution.workspace import Workspace
+from warden.integrations.deadline import call_with_deadline
 from warden.models import Action, ExecutionResult, ExecutionStatus, VerificationResult
 from warden.security.path_validation import PathValidator
 
@@ -117,27 +116,8 @@ class RemoteAuditVerifier:
 
     def _send(self, request: AuditRequest):
         """Run the transport with a hard deadline; the caller never waits longer than the timeout."""
-        box: "queue.Queue[tuple[str, Any]]" = queue.Queue(maxsize=1)
-
-        def run() -> None:
-            try:
-                box.put(("ok", self.transport(request, self.timeout_seconds)))
-            except Exception as exc:
-                box.put(("error", type(exc).__name__))
-
-        worker = threading.Thread(target=run, name="warden-remote-audit", daemon=True)
-        worker.start()
-        try:
-            kind, value = box.get(timeout=self.timeout_seconds)
-        except queue.Empty:
-            logger.error("Remote auditor did not answer within %.1fs", self.timeout_seconds)
-            return None, "timeout"
-        if kind == "error":
-            logger.error("Remote auditor transport failed: %s", value)
-            return None, "transport error"
-        if value is None:
-            return None, "no response"
-        return value, None
+        return call_with_deadline(lambda: self.transport(request, self.timeout_seconds),
+                                  self.timeout_seconds, "remote-auditor")
 
     @staticmethod
     def _post_state_disagreement(local: VerificationResult, raw: Any) -> Optional[str]:
