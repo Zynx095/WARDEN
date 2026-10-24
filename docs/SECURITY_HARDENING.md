@@ -36,6 +36,15 @@ Everything here is implemented and covered by tests in this repository unless ma
 | Intent proposals validated and versioned; parser output untrusted | `agents/intent_agent.py` | `unit/test_intent_agent.py` |
 | SDK inspector routes disabled when hosted; request body cap | `hosting/server.py`, `agents/run_agent.py` | `hosting/` |
 
+## Added with the Agentverse mailbox fix
+
+| Control | Where | Tests |
+|---|---|---|
+| Local runner serves the inspector routes (`/agent_info`, `/messages`, `/connect`, `/disconnect`) to browsers only from `https://agentverse.ai`; other web origins get 403 before the SDK reads the message history or registers the identity (a cross-site text/plain `POST /connect` needs no CORS preflight) | `agents/run_agent.py` (`InspectorOriginGuard`) | `unit/test_run_agent.py`, `integration/test_inspector_discovery_live.py` |
+| Local runner trusts `X-Forwarded-For` only from `127.0.0.1` (the SDK trusts it from anyone, which lets a remote caller pose as loopback after `--bind-all`) | `agents/run_agent.py` | `unit/test_run_agent.py` |
+| Mailbox provisioning without a browser uses the SDK's own signed challenge flow; the API key comes from `.env`/environment only and is never printed; the status check authenticates as the agent and never collects or prints messages | `agents/mailbox.py` | `unit/test_mailbox_cli.py` |
+| The runner refuses `--mailbox` with `--endpoint` (the SDK silently drops the mailbox) and an occupied port (a stale agent would answer the Inspector) | `agents/run_agent.py` | `unit/test_run_agent.py` |
+
 ## Open (not addressed)
 
 - Policy, executor and auditor share one process, OS user and signing key. The local auditor is

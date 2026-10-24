@@ -84,7 +84,7 @@ WARDEN uses `pytest` with automatic discovery configured in `pyproject.toml`.
 .\.venv\Scripts\python.exe -m pytest -v
 ```
 
-Expected result (2026-10-24, Windows 11, Python 3.12): **652 passed, 0 failed**, about 95 s. Tests that need PowerShell
+Expected result (2026-10-24, Windows 11, Python 3.12): **685 passed, 0 failed**, about 70 s. Tests that need PowerShell
 (script parsing) are skipped if neither `pwsh` nor `powershell` is on PATH. No test touches an external network or a real
 credential; the live tests exchange real uAgents envelopes on loopback only.
 
@@ -108,6 +108,11 @@ python -m pytest tests/risk/ -v
 **Auditor Agent, Hosting, Presentation, Acceptance:**
 ```powershell
 python -m pytest tests/auditor/ tests/hosting/ tests/presentation/ tests/acceptance/ -v
+```
+
+**Agentverse Mailbox and Inspector discovery (runner, status/connect helper, live loopback server):**
+```powershell
+python -m pytest tests/unit/test_run_agent.py tests/unit/test_mailbox_cli.py tests/integration/test_inspector_discovery_live.py -v
 ```
 
 **Adversarial Security Tests (Prompt Injection, Forged Tokens, Fake Success):**

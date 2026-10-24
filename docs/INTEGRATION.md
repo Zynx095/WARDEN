@@ -13,7 +13,7 @@ They are different, independent states. Having one does not imply the next.
 | # | State | What it means | Needs | WARDEN status |
 |---|---|---|---|---|
 | 1 | **Local-only uAgent** | Agent runs on your machine, listens on `127.0.0.1:<port>`, ACP handlers attached. Nobody outside the machine can reach it. | Nothing external | **Implemented and locally tested.** Default mode. |
-| 2 | **Mailbox connectivity** | The agent polls an Agentverse-hosted mailbox for messages, so it needs no inbound open port. | An Agentverse account; the mailbox provisioned for this agent address | **Code path implemented (`--mailbox`).** Provisioning requires user Agentverse browser session. |
+| 2 | **Mailbox connectivity** | The agent polls an Agentverse-hosted mailbox for messages, so it needs no inbound open port. | An Agentverse account; the mailbox provisioned for this agent address | **Implemented (`--mailbox`) and tested locally.** Provisioning needs your account: the Inspector's Connect button or `mailbox connect` with an API key. `mailbox status` checks it. |
 | 3 | **External endpoint registration** | The agent publishes a public HTTPS URL; senders deliver directly to `POST /submit`. | A public HTTPS URL (tunnel or server), `--bind-all` or a reverse proxy | Supported via `--endpoint`. **Not recommended.** Exposes the agent directly to the internet. |
 | 4 | **Agentverse discovery** | The agent has an Agentverse profile, is registered with Almanac, and is findable by search / ASI:One routing. | 2 or 3 above, plus published protocol manifest (`--publish-manifest`) | **Code path implemented.** Awaiting external registration. |
 | 5 | **ASI:One conversation** | A user in ASI:One reaches the agent and the chat completes end to end. | 4 above, and a working live session | **Handler verified in mock tests.** Live session not yet run. |
@@ -63,6 +63,11 @@ exercised in tests with mocked contexts, not against a live peer.
 * **Polling Loop:** `MailboxClient._check_mailbox_loop()` continuously polls `GET {agents_api}/{address}/mailbox` with `Authorization: Agent <attestation>`, where the attestation is signed by the agent's private key.
 * **Unprovisioned status:** If the mailbox has not yet been registered on Agentverse, the mailbox API responds with **HTTP 404**, and the agent logs:
   `Agent mailbox not found: create one using the agent inspector`
+* **How the Inspector finds the agent:** the Inspector page (`https://agentverse.ai/inspect/?uri=...`, which embeds
+  `https://agentverse.ai/inspector`) runs `fetch("http://127.0.0.1:<port>/agent_info")` from the browser once when the
+  page loads, without custom headers. Any failure of that fetch, including the browser refusing it, shows
+  **"Agent Not Found — Could not find this Agent on your local network."** The page does not retry that notice, so
+  reload it after the agent is running.
 * **Provisioning Handshake (Browser-assisted `/connect`):**
   1. The agent starts an embedded ASGI server bound to `127.0.0.1:<port>` with `enable_agent_inspector=True` (default).
   2. The agent logs and prints an inspector URL:
@@ -73,6 +78,17 @@ exercised in tests with mocked contexts, not against a live peer.
   6. The local agent signs the challenge with its identity private key and returns the proof (`POST {identity_api}`).
   7. The local agent registers its details, endpoints, and profile (`POST {agents_api}`).
   8. Agentverse provisions the mailbox for that agent address. Subsequent polls return HTTP 200 with message envelopes.
+* **Provisioning without a browser:** `python -m warden.agents.mailbox connect --confirm` (or
+  `.\scripts\mailbox.ps1 connect -Confirm`) runs steps 5–8 itself through the same SDK function
+  (`uagents.mailbox.register_in_agentverse`), authenticated with an Agentverse API key (`AGENTVERSE_API_KEY`)
+  instead of the browser session. A test asserts it sends the same address, name, endpoints and protocols as the
+  Inspector's `/connect`, plus WARDEN's public profile (README, description, starter prompts).
+* **Checking it:** `python -m warden.agents.mailbox status` reads `/agent_info` the way the Inspector does, the
+  public Almanac record, and `GET {agents_api}/{address}/mailbox` with the agent's own signed attestation
+  (HTTP 404 = not provisioned). It never collects or prints messages.
+* **Almanac contract funds:** `I do not have enough funds to register on Almanac contract` concerns the optional
+  on-chain record. The default registration policy registers on the Almanac API first (free); that record is what
+  resolves the agent to its mailbox. No FET is needed for mailbox operation.
 
 ### 2.4 Protocol Manifest Publication & Discovery
 * Protocol manifests describe the interface, schemas, and interaction models of an agent.
@@ -82,7 +98,19 @@ exercised in tests with mocked contexts, not against a live peer.
 
 ### 2.5 Security Invariants & Approver Authorization
 * **Loopback binding:** WARDEN enforces `uagents.asgi.HOST = "127.0.0.1"` (`restrict_bind_host`) unless `--bind-all` is explicitly passed.
-* **Private Network Access (PNA) CORS:** WARDEN's ASGI runner automatically includes `Access-Control-Allow-Private-Network: true` on OPTIONS preflight responses so that modern browsers can reach loopback REST handlers from `https://agentverse.ai`.
+* **Browser access to the local agent:** WARDEN's runner answers with CORS headers and
+  `Access-Control-Allow-Private-Network: true` (for browsers that still send Private Network Access preflights).
+  Chromium 142+ (Chrome, Edge, Brave) instead enforces **Local Network Access**: a public site such as
+  `https://agentverse.ai` may reach `127.0.0.1` only after the user allows it **"Apps on device"** (called "Local
+  network access" before the permission was split). After a prompt is dismissed several times the browser stops
+  showing it for that site; set the permission to Allow at
+  `chrome://settings/content/siteDetails?site=https%3A%2F%2Fagentverse.ai` (`brave://…` / `edge://…`).
+  "Insecure content" (mixed content) does not apply to `127.0.0.1`, and Brave Shields are not involved.
+* **Inspector routes only for the Inspector:** the runner refuses `/agent_info`, `/messages`, `/connect` and
+  `/disconnect` to any web origin other than `https://agentverse.ai` (requests without `Origin`, such as `curl`
+  or `mailbox status`, still work). Otherwise any site a browser lets reach `127.0.0.1` could read the message
+  history or register this identity in another account with a text/plain `POST /connect`. Proxy headers are
+  trusted only from `127.0.0.1`.
 * **Approver isolation:** By default, only the sender who requested an action can approve it. However, in a public chat context (e.g. ASI:One), any remote sender is the requester of their own proposals.
 * **Before public exposure:** The operator must configure `WARDEN_APPROVER_ADDRESSES` in `.env` with their personal agent address. When set, only those designated addresses (or the original requester) can authorize destructive operations.
 
@@ -105,84 +133,85 @@ exercised in tests with mocked contexts, not against a live peer.
 
 ---
 
-## 4. Step-by-Step Operator Setup Procedure
+## 4. Step-by-Step: the ASI:One mailbox agent
 
-Follow these steps in sequence. Run `.\scripts\doctor.ps1` to verify configuration between steps.
+Mailbox mode keeps WARDEN on your machine (bound to `127.0.0.1`, no open port, no public URL) while Agentverse
+holds a mailbox for its address; ASI:One and other agents send to the mailbox and WARDEN collects from it.
+Run `.\scripts\doctor.ps1` whenever something looks off.
 
-### Step 1: Pre-flight Verification
-Confirm that your local environment is sound:
+### Step 1: Pre-flight
 ```powershell
 .\scripts\doctor.ps1
 .\scripts\test.ps1
 .\scripts\demo.ps1
 ```
-Expected: Doctor reports 24 passed (with warnings for optional unconfigured mailbox/ASI:One key), 192 tests pass, and demo reports 12 independent checks passed.
 
-### Step 2: Start WARDEN in Mailbox Mode
-Launch the agent with mailbox mode enabled:
+### Step 2: Start WARDEN as a mailbox agent
 ```powershell
-.\scripts\run.ps1 -Mailbox
+.\scripts\run.ps1 -Mailbox -PublishManifest -DemoWorkspace
 ```
-Console output will display:
-```
-[STARTING] WARDEN agent agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7
-  Config file: D:\AI\WARDEN\.env
-  Mode:        mailbox (configured, Agentverse provisioning not verified)
-  Listening:   127.0.0.1:8000 (loopback only)
-  Inspector:   https://agentverse.ai/inspect/?uri=http%3A//127.0.0.1%3A8000&address=agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7
-  Note:        If mailbox is not yet provisioned on Agentverse, open the
-               Inspector URL above in your browser to complete connection.
-  Browser tip: If the Inspector shows 'Check your agent' instructions, your
-               browser is blocking mixed-content from HTTPS (agentverse.ai)
-               to local HTTP. In Chrome/Edge: click site settings -> allow
-               'Insecure content' for agentverse.ai and refresh the page.
-```
-*Note: Before provisioning, the agent log will periodically show:*
-`[WARN] Agent mailbox not found: create one using the agent inspector`
+`-DemoWorkspace` runs on the synthetic sandbox (`hosted_workspace\`: `README.txt`, `cache.tmp`, `debug.log`, a decoy
+`production.env`) that the public Agentverse profile describes and the starter prompts use. The banner prints the
+Inspector URL, the commands below and browser guidance. Before the mailbox exists the log shows
+`Agent mailbox not found: create one using the agent inspector`, and
+`I do not have enough funds to register on Almanac contract` is expected (see 2.3). Leave the agent running.
 
-### Step 3: Complete Mailbox Provisioning in Agentverse
-1. Keep `.\scripts\run.ps1 -Mailbox` running in your terminal.
-2. In your web browser, log in to your account at [https://agentverse.ai](https://agentverse.ai).
-3. Navigate to the Inspector URL printed in Step 2:
-   `https://agentverse.ai/inspect/?uri=http%3A//127.0.0.1%3A8000&address=agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7`
-4. **If the Inspector displays "Check your agent" instructions:**
-   - This popup is a generic frontend fallback caused by browser security blocking cross-origin HTTP calls from a public HTTPS page (`agentverse.ai`) to localhost (`http://127.0.0.1:8000`).
-   - **Do NOT add `endpoint=("http://127.0.0.1:8000/submit")` to your code.** In uAgents 0.26.1, adding `endpoint` overrides and disables `mailbox=True`.
-   - **In Google Chrome / Microsoft Edge:**
-     1. Click the "View site information" (tune / padlock icon) on the left side of the address bar next to `https://agentverse.ai`.
-     2. Click **Site settings**.
-     3. Locate **Insecure content** and change it from *Block (default)* to **Allow**.
-     4. Return to the Inspector tab and refresh the page (F5).
-   - **In Brave:**
-     1. Click the Brave Shields (lion icon) in the address bar.
-     2. Toggle Shields **DOWN** for `agentverse.ai` and refresh the page.
-5. Once the browser connects, the Inspector UI will display WARDEN's agent details (`agent1q0kew...`). Click **Connect** and select **Mailbox**.
-6. The browser issues `POST /connect` to `http://127.0.0.1:8000/connect`, completing the cryptographic challenge-response registration.
+### Step 3: Connect the mailbox (once per agent address)
 
-### Step 4: Confirm Mailbox Connectivity
-Look at the terminal where WARDEN is running:
-- You will see:
-  `[INFO] Successfully registered as mailbox agent in Agentverse`
-- On the next poll interval (5s), the 404 warning stops, and `MailboxClient` polls successfully.
-- In your Agentverse dashboard ([https://agentverse.ai/agents](https://agentverse.ai/agents)), WARDEN will appear as an active **Mailbox** agent.
+**Option A — Agentverse Inspector (browser):**
+1. Sign in at [https://agentverse.ai](https://agentverse.ai) in the same browser.
+2. Allow agentverse.ai to reach your machine: open
+   `chrome://settings/content/siteDetails?site=https%3A%2F%2Fagentverse.ai` (Brave: `brave://…`, Edge: `edge://…`)
+   and set **Apps on device** (Brave may call it *Localhost access*) to **Allow** (if a page instead asks to let agentverse.ai access apps or devices on
+   this device, click **Allow**). Without this the Inspector shows "Agent Not Found" even though the agent is
+   running. "Insecure content" and Brave Shields are unrelated; leave them alone.
+3. Open (or reload) the Inspector URL from the banner. It must show your agent's address.
+4. Click **Connect** → **Mailbox** → finish. The agent's terminal prints
+   `Successfully registered as mailbox agent in Agentverse`.
 
-### Step 5: Publish Protocol Manifest for Discovery
-Once mailbox connectivity is verified, restart WARDEN with manifest publishing enabled:
+**Option B — no browser (API key):**
+1. Create a key at [https://agentverse.ai/profile/api-keys](https://agentverse.ai/profile/api-keys).
+2. Add a line `AGENTVERSE_API_KEY=<your key>` to `.env` yourself (it is git-ignored; never paste the key into a chat
+   or commit it).
+3. Preview, then send:
+   ```powershell
+   .\scripts\mailbox.ps1 connect -DryRun
+   .\scripts\mailbox.ps1 connect -Confirm
+   ```
+   It registers the agent as a Mailbox agent with WARDEN's public profile and verifies the mailbox afterwards. An
+   Agentverse refusal (invalid key, address owned by another account, agent limit) is printed as Agentverse sent
+   it, with the next step. If the address is already registered with another connection type (for example an
+   earlier hosted/proxy registration), remove that first with `.\scripts\mailbox.ps1 disconnect -Confirm` (or
+   under Agentverse → My Agents) and connect again. With the key in `.env`, `mailbox.ps1 status` also shows the
+   agent's registration type in your account.
+
+### Step 4: Verify
 ```powershell
-.\scripts\run.ps1 -Mailbox -PublishManifest
+.\scripts\mailbox.ps1 status
 ```
-Terminal logs will confirm:
-`[INFO] Manifest published successfully: AgentChatProtocol`
-Your agent's capabilities are now indexed in Almanac and searchable by ASI:One.
+Expected: every check `PASS` — the local agent answers `/agent_info` for your address with the mailbox endpoint
+and AgentChatProtocol, the browser-access headers are correct, the Almanac record routes to the mailbox and lists
+the chat protocol, and **Agentverse mailbox: provisioned**. If the local checks pass but the Inspector still says
+"Agent Not Found", the browser is blocking it (Step 3A.2). If the local check names a different agent, a stale
+process holds the port: stop it (`Get-NetTCPConnection -LocalPort 8000` shows the owner). On
+[https://agentverse.ai/agents](https://agentverse.ai/agents) the agent appears with a **Mailbox** tag.
 
-### Step 6: Test an ASI:One Conversation
-1. Open [https://asi1.ai](https://asi1.ai) or your ASI:One client.
-2. Search for WARDEN by name (`warden-verification-agent`) or address (`agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7`).
-3. Send a test message: `"Read README.txt"`.
-4. Send a mutation request: `"Clean up temporary files in the workspace"`.
-5. Observe the `[AWAITING APPROVAL]` response with the action ID.
-6. Reply with: `APPROVE <action-id>`.
-7. Verify that WARDEN executes the operation, ground-truth verifies the outcome, and replies with `[VERIFIED]`.
+### Step 5: Talk to it from ASI:One
+1. Open [https://asi1.ai](https://asi1.ai) and address the agent by its address (or name,
+   `warden-verification-agent`), or start a chat from its page on Agentverse. New agents can take a while to
+   appear in ASI:One search; the address works as soon as the mailbox is connected.
+2. Try `List the files in the WARDEN workspace`, then `Delete cache.tmp`.
+3. WARDEN pauses with **AWAITING APPROVAL**. Approve by replying with the exact line it gives:
+   `APPROVE <action-id> <digest>` (or `REJECT ...`). With `WARDEN_INTERACTIVE_CARDS=true` it also shows buttons.
+4. `Delete production.env` is blocked by policy however it is phrased.
+
+**Confirming that a real message reached WARDEN:** the agent's terminal logs
+`Received ACP ChatMessage from <sender>` and `Sent ACP response to <sender>`, and
+`.\scripts\mailbox.ps1 status` reports `Inbound chat messages: N received since the agent started` (counts and
+sender only, never content).
+
+Before inviting others: set `WARDEN_APPROVAL_MODE=independent` and `WARDEN_APPROVER_ADDRESSES` so requesters
+cannot approve their own destructive actions (the banner warns while this is unset).
 
 ---
 
@@ -190,7 +219,8 @@ Your agent's capabilities are now indexed in Almanac and searchable by ASI:One.
 
 | Credential | Where it belongs | Purpose | Sensitivity |
 |---|---|---|---|
-| **Agentverse Account** | Browser session at `agentverse.ai` | Authenticates your user account to provision the agent's mailbox via `/connect` | Private user account credentials |
+| **Agentverse Account** | Browser session at `agentverse.ai` | Inspector path: authorizes the mailbox via `/connect` | Private user account credentials |
+| `AGENTVERSE_API_KEY` | `.env` (optional) | Browser-free path: `mailbox.ps1 connect -Confirm`; hosted registration | **Secret.** Never commit or paste into chats |
 | `AGENT_SEED` | `.env` (already populated) | Derives persistent cryptographic agent address (`agent1q...`) | **Critical secret.** Never commit or share |
 | `WARDEN_APPROVER_ADDRESSES` | `.env` (optional, recommended before public exposure) | Comma-separated agent addresses permitted to approve destructive actions | Public addresses (`agent1q...`) |
 | `ASI_ONE_API_KEY` | `.env` (optional) | Only needed if using ASI:One hosted LLM for intent parsing (otherwise rule-based deterministic parser handles commands) | Secret API key |
@@ -201,6 +231,8 @@ Your agent's capabilities are now indexed in Almanac and searchable by ASI:One.
 
 ## 6. What is not claimed
 
-* No live Agentverse registration, mailbox provisioning, or ASI:One chat has been performed yet in this environment.
+* Mailbox provisioning, the Inspector flow in a real browser, Agentverse registration and an ASI:One chat have not
+  been run from this repository's tests. The tests cover the local server (real HTTP on loopback, including a real
+  Agent Chat Protocol exchange), the provisioning request, and the status checks with Agentverse mocked.
 * The ASI:One LLM intent endpoint (`https://api.asi1.ai/v1`, `asi1-mini`) is tested hermetically with mocks; actual live behavior depends on upstream API availability.
 * WARDEN's deterministic policy engine and verification core do not depend on the LLM or external services.
