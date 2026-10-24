@@ -131,16 +131,16 @@ def _risk_analyst_address() -> Optional[str]:
     return raw
 
 
-def _risk_analyst_endpoint() -> Optional[str]:
-    """Optional fixed endpoint for the analyst (e.g. a sidecar on loopback); otherwise Almanac resolves it."""
-    raw = (os.getenv("WARDEN_RISK_ANALYST_ENDPOINT") or "").strip()
+def _peer_endpoint(name: str) -> Optional[str]:
+    """Optional fixed endpoint for a peer agent (e.g. a sidecar on loopback); otherwise Almanac resolves it."""
+    raw = (os.getenv(name) or "").strip()
     if not raw:
         return None
     parsed = urllib.parse.urlparse(raw)
     if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path.rstrip("/") != "/submit":
-        raise ConfigError("WARDEN_RISK_ANALYST_ENDPOINT must be an absolute URL ending in /submit.")
+        raise ConfigError(f"{name} must be an absolute URL ending in /submit.")
     if parsed.scheme == "http" and parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
-        raise ConfigError("WARDEN_RISK_ANALYST_ENDPOINT may use plain http only on loopback.")
+        raise ConfigError(f"{name} may use plain http only on loopback.")
     return raw.rstrip("/")
 
 
@@ -206,10 +206,11 @@ class WardenConfig(BaseModel):
     auditor_timeout_seconds: int = Field(
         default_factory=lambda: env_int("WARDEN_AUDITOR_TIMEOUT_SECONDS", 10, 1, 120)
     )
+    auditor_endpoint: Optional[str] = Field(default_factory=lambda: _peer_endpoint("WARDEN_AUDITOR_ENDPOINT"))
     # Risk Analyst (advisory only). "local" runs it in-process; "remote" asks a separate uAgent.
     risk_analyst: str = Field(default_factory=_risk_analyst_mode)
     risk_analyst_address: Optional[str] = Field(default_factory=_risk_analyst_address)
-    risk_analyst_endpoint: Optional[str] = Field(default_factory=_risk_analyst_endpoint)
+    risk_analyst_endpoint: Optional[str] = Field(default_factory=lambda: _peer_endpoint("WARDEN_RISK_ANALYST_ENDPOINT"))
     risk_analyst_timeout_seconds: int = Field(
         default_factory=lambda: env_int("WARDEN_RISK_ANALYST_TIMEOUT_SECONDS", 5, 1, 60)
     )

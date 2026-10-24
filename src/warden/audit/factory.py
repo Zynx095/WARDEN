@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from uagents.crypto import Identity
+from uagents.resolver import RulesBasedResolver
 
 from warden.audit.remote import RemoteAuditVerifier
 from warden.audit.transport import UAgentAuditTransport
@@ -28,7 +29,8 @@ def build_remote_auditor_if_enabled(
     sender = Identity.from_seed(agent_seed, 0)
     if cfg.auditor_address == sender.address:
         raise ConfigError("WARDEN_AUDITOR_ADDRESS must be a different identity from WARDEN's own address.")
-    transport: Any = UAgentAuditTransport(cfg.auditor_address, sender)
+    resolver = RulesBasedResolver({cfg.auditor_address: cfg.auditor_endpoint}) if cfg.auditor_endpoint else None
+    transport: Any = UAgentAuditTransport(cfg.auditor_address, sender, resolver=resolver)
     return RemoteAuditVerifier(
         workspace,
         transport=transport,
