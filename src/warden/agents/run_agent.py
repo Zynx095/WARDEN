@@ -25,6 +25,7 @@ from typing import List, Optional, Union
 
 from uagents import Agent
 
+from warden.audit.factory import build_remote_auditor_if_enabled
 from warden.agents.warden_agent import WardenAgent
 from warden.config import ConfigError, env_bool, get_config, load_environment, resolve_repo_path
 from warden.execution.workspace import Workspace
@@ -168,7 +169,11 @@ def build_warden_agent(
 
     ws_path = resolve_repo_path(workspace_dir or os.getenv("WARDEN_WORKSPACE_ROOT") or "./temp_workspace")
     workspace = Workspace(ws_path)
-    warden_core = WardenAgent(workspace=workspace, audit_log_file=get_config().audit_log)
+    warden_core = WardenAgent(
+        workspace=workspace,
+        audit_log_file=get_config().audit_log,
+        auditor=build_remote_auditor_if_enabled(workspace, agent_seed),
+    )
 
     agent = Agent(
         name=agent_name,
