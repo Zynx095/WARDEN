@@ -10,7 +10,7 @@ from warden.presentation.badges import (
     badge,
     op_icon,
     policy_description,
-    risk_from_operation,
+    risk_label,
 )
 
 
@@ -78,15 +78,25 @@ class TestPolicyDescription:
         assert policy_description("WDN-999") == "WDN-999"
 
 
-class TestRiskFromOperation:
-    def test_delete_is_high(self):
-        assert "High" in risk_from_operation("DELETE")
+class TestPoliciesMatchTheEngine:
+    def test_every_policy_id_the_engine_uses_is_described(self):
+        import re
+        from pathlib import Path
+        import warden.security.policy as policy
+        import warden.agents.warden_agent as agent
+        used = set()
+        for mod in (policy, agent):
+            used |= set(re.findall(r'"(WDN-\d{3})"', Path(mod.__file__).read_text(encoding="utf-8")))
+        assert used and all(policy_description(pid) != pid for pid in used)
 
-    def test_read_is_none_risk(self):
-        assert "None" in risk_from_operation("READ")
+    def test_approved_exception_ids_are_described(self):
+        assert "WDN-005" in policy_description("WDN-005-APPROVED")
 
-    def test_write_is_medium(self):
-        assert "Medium" in risk_from_operation("WRITE")
 
-    def test_unknown_returns_unknown(self):
-        assert "Unknown" in risk_from_operation("COMPRESS")
+class TestRiskLabel:
+    def test_assessed_levels(self):
+        assert risk_label({"status": "ASSESSED", "risk_level": "HIGH"}).endswith("HIGH")
+
+    def test_unavailable_and_missing(self):
+        assert risk_label({"status": "UNAVAILABLE"}) == "unavailable"
+        assert risk_label(None) == "not assessed"

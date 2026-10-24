@@ -52,6 +52,18 @@ def sanitize(value: Any, limit: int = _CARD_VALUE_LIMIT, *, code_span: bool = Fa
     return text.strip()
 
 
+def sanitize_block(value: Any, limit: int = 1500) -> str:
+    """Multi-line text (e.g. read output) safe inside a fenced code block: printable characters,
+    newlines and tabs only, no backtick fences, bounded length."""
+    if value is None:
+        return ""
+    text = "".join(ch for ch in str(value) if ch.isprintable() or ch in "\n\t")
+    text = text.replace("`", "'")
+    if len(text) > limit:
+        text = text[: limit - 1] + "…"
+    return text.rstrip()
+
+
 def scrub_paths(text: Any, workspace_root: Optional[Path | str] = None) -> str:
     """Remove local filesystem path variants from text to prevent path leakage.
 
