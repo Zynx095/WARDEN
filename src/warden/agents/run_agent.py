@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from uagents import Agent
+from uagents.resolver import Resolver
 
 from warden.audit.factory import build_remote_auditor_if_enabled
 from warden.agents.warden_agent import WardenAgent
@@ -143,8 +144,13 @@ def build_warden_agent(
     publish_manifest: bool = False,
     description: Optional[str] = None,
     readme_path: Optional[str] = None,
+    resolver: Optional[Resolver] = None,
+    loop: Optional[asyncio.AbstractEventLoop] = None,
 ) -> Agent:
     """Build and configure a uAgents Agent running WARDEN with native ACP.
+
+    ``resolver`` and ``loop`` default to the SDK's Almanac resolver and the process event
+    loop; tests pass explicit ones to run several agents on loopback in one process.
 
     Security invariants:
     - No hardcoded or placeholder seeds; an explicit seed or AGENT_SEED is mandatory.
@@ -181,7 +187,8 @@ def build_warden_agent(
         port=port,
         endpoint=endpoint,
         mailbox=use_mailbox,
-        loop=_ensure_event_loop(),
+        resolve=resolver,
+        loop=loop or _ensure_event_loop(),
         # Telemetry is only meaningful once registered on Agentverse; keep local mode quiet.
         report_events=bool(use_mailbox or endpoint),
         description=agent_desc,
