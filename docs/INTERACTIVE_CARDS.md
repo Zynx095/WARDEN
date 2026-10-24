@@ -70,8 +70,23 @@ for comparison and was not merged, in whole or in part. Evidence, from running b
 | Decisions read from `MetadataContent` | no (documented route is chat text only) | yes (`card_action_payload`, `action`/`action_id` keys) |
 | File contents in cards | never | read output (up to 500 chars) in the result card |
 | Expiry | explicit `EXPIRED` | reported as generic "not found" |
-| Tests | 461 (suite incl. loopback card round trip) | 356 |
+| Tests at selection time | 461 (suite incl. loopback card round trip) | 356 |
 
 Nothing from the alternative was retained: its protections (digest match, replay, state
 check) already exist in the core path used here, and its models describe a non-documented
 schema. Regression tests in `tests/integration/test_interactive_cards.py` cover the gaps above.
+
+## Update on `integration/sentinel-final`
+
+- The selection above stands. The UI/UX workstream's card builders and `PolishedACPHandler` were
+  not integrated for the same reasons (see [UIUX_INTEGRATION.md](UIUX_INTEGRATION.md)); its
+  presentation vocabulary was: card titles carry operation icons, the review card shows the
+  advisory risk, the content hash (for writes), the expiry and who may approve.
+- With `WARDEN_APPROVAL_MODE=independent`, a click by the requester is refused exactly like a
+  typed command (`Independent approval is required`); an independent approver's click executes.
+- Card and text approvals are asserted to reach the same `WardenAgent.approve_and_execute` call
+  with the same arguments (`tests/acceptance/test_acceptance.py::test_03_04_*`).
+- Approval consumption is durable, so a replayed click is refused after a restart too.
+- Still not verified: rendering and button behaviour in ASI:One itself, the planner's narration of
+  a click, and the sender address ASI:One uses for clicks. If ASI:One does not return the full
+  digest or a stable sender, the click is refused and the text command remains the fallback.
