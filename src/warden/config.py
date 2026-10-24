@@ -175,11 +175,12 @@ class WardenConfig(BaseModel):
         default_factory=lambda: env_int("WARDEN_AUDITOR_TIMEOUT_SECONDS", 10, 1, 120)
     )
 
+    secret_key: str = Field(default_factory=_secret_key, repr=False)
+
     def __init__(self, **data) -> None:
         super().__init__(**data)
         if self.remote_auditor and not self.auditor_address:
             raise ConfigError("WARDEN_REMOTE_AUDITOR=true requires WARDEN_AUDITOR_ADDRESS.")
-    secret_key: str = Field(default_factory=_secret_key, repr=False)
 
 
 _DEFAULT_CONFIG: WardenConfig | None = None
