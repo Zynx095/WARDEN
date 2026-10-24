@@ -42,17 +42,29 @@ def _last_hash(log_file: Path) -> str:
 
 
 def verify_audit_chain(log_file: Path) -> Tuple[bool, int, str]:
-    """(intact, lines checked, reason). Fails on the first line that breaks the chain."""
+    """(intact, chained lines checked, reason). Fails on the first line that breaks the chain.
+
+    Lines written before chaining existed may precede the chain; they are counted and named in
+    the reason (they are not covered), but once chained lines start, every line must chain.
+    """
     prev = GENESIS
     count = 0
+    legacy = 0
     with open(log_file, encoding="utf-8") as f:
         for number, line in enumerate(f, 1):
             if not line.strip():
                 continue
             try:
                 record = json.loads(line)
-                chain = record.pop("chain")
-            except (ValueError, KeyError, AttributeError):
+            except ValueError:
+                return False, count, f"line {number} is not valid JSON"
+            if not isinstance(record, dict):
+                return False, count, f"line {number} is not an audit record"
+            if "chain" not in record and count == 0:
+                legacy += 1
+                continue
+            chain = record.pop("chain", None)
+            if not isinstance(chain, dict):
                 return False, count, f"line {number} is not a chained audit record"
             if chain.get("prev") != prev:
                 return False, count, f"line {number} does not follow the previous record"
@@ -60,6 +72,8 @@ def verify_audit_chain(log_file: Path) -> Tuple[bool, int, str]:
                 return False, count, f"line {number} was modified"
             prev = chain["hash"]
             count += 1
+    if legacy:
+        return True, count, f"audit chain intact; {legacy} earlier unchained record(s) are not covered"
     return True, count, "audit chain intact"
 
 

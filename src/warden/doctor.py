@@ -169,7 +169,8 @@ def check_filesystem() -> List[Check]:
         if cfg.audit_log.is_file():
             from warden.audit.events import verify_audit_chain
             intact, count, reason = verify_audit_chain(cfg.audit_log)
-            checks.append(Check(PASS if intact else FAIL, "Audit log hash chain", f"{reason} ({count} records)",
+            level = FAIL if not intact else (WARN if "not covered" in reason else PASS)
+            checks.append(Check(level, "Audit log hash chain", f"{reason} ({count} chained records)",
                                 "" if intact else "Investigate the audit log; it was edited or truncated"))
     if cfg.state_db is None:
         checks.append(Check(WARN, "Approval state (WARDEN_STATE_DB)",
