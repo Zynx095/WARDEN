@@ -54,8 +54,8 @@ def test_live_agentverse_request_proposes_single_action(workspace_with_fixtures:
     assert ack.acknowledged_msg_id == msg.msg_id
 
     reply_text = reply.content[0].text
-    assert "Evaluated 1 proposed operation(s):" in reply_text
-    assert "[AWAITING APPROVAL]" in reply_text
+    assert "Evaluated 1 operation:" in reply_text
+    assert "🔒 AWAITING APPROVAL" in reply_text
     assert "WDN-004" in reply_text
     assert "debug.log" not in reply_text
 
@@ -79,13 +79,13 @@ def test_repeated_distinct_requests_behave_correctly(workspace_with_fixtures: Wo
     # Request 1: Delete cache.tmp
     msg1 = ChatMessage(content=[TextContent(type="text", text="Delete cache.tmp")])
     _, reply1 = handler.process_chat_message(msg1, sender="operator")
-    assert "Evaluated 1 proposed operation(s):" in reply1.content[0].text
+    assert "Evaluated 1 operation:" in reply1.content[0].text
     pending1 = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply1.content[0].text).group(1)
 
     # Approve Request 1
     approve_msg1 = ChatMessage(content=[TextContent(type="text", text=f"APPROVE {pending1}")])
     _, approve_reply1 = handler.process_chat_message(approve_msg1, sender="operator")
-    assert "Action Approval Execution Verified" in approve_reply1.content[0].text
+    assert "Executed after approval, and the actual outcome was independently confirmed" in approve_reply1.content[0].text
     assert "VERIFIED" in approve_reply1.content[0].text
     assert not workspace_with_fixtures.exists("cache.tmp")
     assert workspace_with_fixtures.exists("debug.log") is True
@@ -93,14 +93,14 @@ def test_repeated_distinct_requests_behave_correctly(workspace_with_fixtures: Wo
     # Request 2: Distinct request to delete debug.log
     msg2 = ChatMessage(content=[TextContent(type="text", text="Delete debug.log")])
     _, reply2 = handler.process_chat_message(msg2, sender="operator")
-    assert "Evaluated 1 proposed operation(s):" in reply2.content[0].text
+    assert "Evaluated 1 operation:" in reply2.content[0].text
     pending2 = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply2.content[0].text).group(1)
     assert pending2 != pending1
 
     # Approve Request 2
     approve_msg2 = ChatMessage(content=[TextContent(type="text", text=f"APPROVE {pending2}")])
     _, approve_reply2 = handler.process_chat_message(approve_msg2, sender="operator")
-    assert "Action Approval Execution Verified" in approve_reply2.content[0].text
+    assert "Executed after approval, and the actual outcome was independently confirmed" in approve_reply2.content[0].text
     assert "VERIFIED" in approve_reply2.content[0].text
     assert not workspace_with_fixtures.exists("debug.log")
 
@@ -123,7 +123,7 @@ def test_duplicate_message_delivery_does_not_execute_action_twice(workspace_with
 
     # First delivery: normal execution
     ack1, reply1 = handler.process_chat_message(approve_msg, sender="operator")
-    assert "Action Approval Execution Verified" in reply1.content[0].text
+    assert "Executed after approval, and the actual outcome was independently confirmed" in reply1.content[0].text
     assert "VERIFIED" in reply1.content[0].text
     assert not workspace_with_fixtures.exists("cache.tmp")
 
@@ -136,7 +136,7 @@ def test_duplicate_message_delivery_does_not_execute_action_twice(workspace_with
     # Must return identical cached acknowledgement and verified response without re-execution
     assert ack2.acknowledged_msg_id == approve_msg.msg_id
     assert reply2.content[0].text == reply1.content[0].text
-    assert "Action Approval Execution Verified" in reply2.content[0].text
+    assert "Executed after approval, and the actual outcome was independently confirmed" in reply2.content[0].text
 
     # File on disk was NOT touched or deleted by the duplicate delivery
     assert workspace_with_fixtures.exists("cache.tmp") is True
@@ -177,12 +177,12 @@ def test_legitimate_multi_action_requests_are_not_suppressed(workspace_with_fixt
     # Explicit multi-target request
     multi_msg = ChatMessage(content=[TextContent(type="text", text="Delete cache.tmp and debug.log")])
     _, multi_reply = handler.process_chat_message(multi_msg, sender="operator")
-    assert "Evaluated 2 proposed operation(s):" in multi_reply.content[0].text
+    assert "Evaluated 2 operations:" in multi_reply.content[0].text
 
     # General workspace cleanup request
     cleanup_msg = ChatMessage(content=[TextContent(type="text", text="Clean up temporary files in workspace")])
     _, cleanup_reply = handler.process_chat_message(cleanup_msg, sender="operator")
-    assert "Evaluated 2 proposed operation(s):" in cleanup_reply.content[0].text
+    assert "Evaluated 2 operations:" in cleanup_reply.content[0].text
 
 
 def test_protected_configuration_rejection_preserved(workspace_with_fixtures: Workspace):
@@ -197,8 +197,8 @@ def test_protected_configuration_rejection_preserved(workspace_with_fixtures: Wo
     _, reply = handler.process_chat_message(msg, sender="operator")
 
     reply_text = reply.content[0].text
-    assert "Evaluated 1 proposed operation(s):" in reply_text
-    assert "[BLOCKED]" in reply_text
+    assert "Evaluated 1 operation:" in reply_text
+    assert "🚫 BLOCKED" in reply_text
     assert "WDN-003" in reply_text
     assert "Protected resource modification is prohibited" in reply_text
     assert workspace_with_fixtures.exists("production.env") is True

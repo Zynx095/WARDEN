@@ -60,8 +60,8 @@ def test_primary_cleanup_workflow_end_to_end(disposable_workspace: Workspace):
     assert ack.acknowledged_msg_id == inbound_acp_msg.msg_id
 
     reply_text = acp_reply.content[0].text
-    assert "Action Verification Report" in reply_text
-    assert "[AWAITING APPROVAL]" in reply_text
+    assert "Security Verification Report" in reply_text
+    assert "🔒 AWAITING APPROVAL" in reply_text
 
     # Extract pending action IDs from the reply
     pending_ids = re.findall(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply_text)
@@ -75,7 +75,7 @@ def test_primary_cleanup_workflow_end_to_end(disposable_workspace: Workspace):
     approve_msg = ChatMessage(content=[TextContent(type="text", text=f"APPROVE {pending_ids[0]}")])
     _, approval_reply = acp_handler.process_chat_message(approve_msg, sender="security_officer")
 
-    assert "Approval Execution Verified" in approval_reply.content[0].text
+    assert "independently confirmed" in approval_reply.content[0].text
     assert "VERIFIED" in approval_reply.content[0].text
 
     # Verify that the approved file was deleted and verified on disk
@@ -87,7 +87,7 @@ def test_primary_cleanup_workflow_end_to_end(disposable_workspace: Workspace):
     _, adv_reply = acp_handler.process_chat_message(adv_msg, sender="adversarial_user")
 
     adv_reply_text = adv_reply.content[0].text
-    assert "[BLOCKED]" in adv_reply_text
+    assert "🚫 BLOCKED" in adv_reply_text
     assert "WDN-003" in adv_reply_text
     assert "Protected resource modification is prohibited" in adv_reply_text
 
@@ -133,7 +133,7 @@ def test_read_workspace_filenames_and_content_end_to_end(disposable_workspace: W
 
     # Trace 6: Result returned to the chat containing actual filenames
     reply_text = acp_reply.content[0].text
-    assert "[VERIFIED]" in reply_text
+    assert "✅ VERIFIED" in reply_text
     assert "README.md" in reply_text
     assert "cache.tmp" in reply_text
     assert "debug.log" in reply_text
@@ -151,14 +151,14 @@ def test_read_workspace_filenames_and_content_end_to_end(disposable_workspace: W
     # 2. Reading a specific file returns its actual contents
     read_file_msg = ChatMessage(content=[TextContent(type="text", text="Read README.md")])
     _, read_file_reply = acp_handler.process_chat_message(read_file_msg, sender="asi1_chat_user")
-    assert "[VERIFIED]" in read_file_reply.content[0].text
+    assert "✅ VERIFIED" in read_file_reply.content[0].text
     assert "# Project Documentation" in read_file_reply.content[0].text
     assert "Preserve this file." in read_file_reply.content[0].text
 
     # 3. Path traversal read is blocked by policy engine
     escape_msg = ChatMessage(content=[TextContent(type="text", text="Read ../../outside.txt")])
     _, escape_reply = acp_handler.process_chat_message(escape_msg, sender="adversary")
-    assert "[BLOCKED]" in escape_reply.content[0].text
+    assert "🚫 BLOCKED" in escape_reply.content[0].text
     assert "WDN-002" in escape_reply.content[0].text
 
 def test_exact_live_agentverse_chat_input_reproduction(disposable_workspace: Workspace):
@@ -181,13 +181,13 @@ def test_exact_live_agentverse_chat_input_reproduction(disposable_workspace: Wor
     assert ack.acknowledged_msg_id == inbound_acp_msg.msg_id
 
     reply_text = reply.content[0].text
-    assert "[VERIFIED]" in reply_text
+    assert "✅ VERIFIED" in reply_text
     assert "README.md" in reply_text
     assert "cache.tmp" in reply_text
     assert "debug.log" in reply_text
     assert "production.env" in reply_text
     assert "- **Output:**" in reply_text
-    assert "No filesystem mutations or tool operations were proposed" not in reply_text
+    assert "No filesystem operation was proposed" not in reply_text
 
     # Ground truth: no files were deleted, created, or modified
     assert disposable_workspace.exists("production.env") is True

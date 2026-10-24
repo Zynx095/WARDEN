@@ -48,7 +48,7 @@ def test_safe_create_via_acp(acp_handler: WardenACPHandler, acp_workspace: Works
 
     assert ack.acknowledged_msg_id == in_msg.msg_id
     reply_text = reply.content[0].text
-    assert "[VERIFIED]" in reply_text
+    assert "✅ VERIFIED" in reply_text
     assert acp_workspace.exists("doc.txt") is True
 
 
@@ -66,7 +66,7 @@ def test_destructive_action_and_subsequent_approval_via_acp(
     ack1, reply1 = acp_handler.process_chat_message(in_msg, sender="asi1_user")
 
     reply_text1 = reply1.content[0].text
-    assert "[AWAITING APPROVAL]" in reply_text1
+    assert "🔒 AWAITING APPROVAL" in reply_text1
     assert "APPROVE" in reply_text1
     # File still exists on disk
     assert acp_workspace.exists("obsolete.tmp") is True
@@ -82,7 +82,7 @@ def test_destructive_action_and_subsequent_approval_via_acp(
     ack2, reply2 = acp_handler.process_chat_message(approval_msg, sender="asi1_user")
 
     reply_text2 = reply2.content[0].text
-    assert "Approval Execution Verified" in reply_text2
+    assert "independently confirmed" in reply_text2
     assert "VERIFIED" in reply_text2
     # File is now deleted and verified on disk
     assert not acp_workspace.exists("obsolete.tmp")
@@ -95,7 +95,7 @@ def test_prohibited_operation_blocked_via_acp(acp_handler: WardenACPHandler):
     ack, reply = acp_handler.process_chat_message(in_msg, sender="asi1_user")
 
     reply_text = reply.content[0].text
-    assert "[BLOCKED]" in reply_text
+    assert "🚫 BLOCKED" in reply_text
     assert "WDN-003" in reply_text
     assert "Protected resource modification is prohibited" in reply_text
 
@@ -113,7 +113,7 @@ def test_list_filenames_via_acp(acp_handler: WardenACPHandler, acp_workspace: Wo
     assert ack.acknowledged_msg_id == in_msg.msg_id
 
     reply_text = reply.content[0].text
-    assert "[VERIFIED]" in reply_text
+    assert "✅ VERIFIED" in reply_text
     assert "alpha.txt" in reply_text
     assert "beta.log" in reply_text
     assert "Output:" in reply_text
@@ -129,7 +129,7 @@ def test_read_file_content_via_acp(acp_handler: WardenACPHandler, acp_workspace:
 
     assert ack.acknowledged_msg_id == in_msg.msg_id
     reply_text = reply.content[0].text
-    assert "[VERIFIED]" in reply_text
+    assert "✅ VERIFIED" in reply_text
     assert "Project documentation content." in reply_text
 
 def test_list_filenames_with_leading_mention_and_negative_constraints(
@@ -153,12 +153,12 @@ def test_list_filenames_with_leading_mention_and_negative_constraints(
     assert ack.acknowledged_msg_id == in_msg.msg_id
 
     reply_text = reply.content[0].text
-    assert "[VERIFIED]" in reply_text
+    assert "✅ VERIFIED" in reply_text
     assert "README.txt" in reply_text
     assert "app_settings.json" in reply_text
     assert "debug_output.log" in reply_text
     assert "Output:" in reply_text
-    assert "No filesystem mutations or tool operations were proposed" not in reply_text
+    assert "No filesystem operation was proposed" not in reply_text
 
 
 def test_approve_with_leading_mention(
@@ -182,6 +182,6 @@ def test_approve_with_leading_mention(
         text=f"@agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7 APPROVE {pending_id}",
     )])
     _, rep2 = acp_handler.process_chat_message(approve_msg, sender="bob")
-    assert "Approval Execution Verified" in rep2.content[0].text
+    assert "independently confirmed" in rep2.content[0].text
     assert "VERIFIED" in rep2.content[0].text
     assert not acp_workspace.exists("junk.tmp")

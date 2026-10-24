@@ -155,7 +155,7 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
     assert str(tmp_path) not in json.dumps(health)
 
     blocked_reply = ask("delete production.env")
-    assert "[BLOCKED]" in blocked_reply and (tmp_path / "hosted" / "production.env").is_file()
+    assert "🚫 BLOCKED" in blocked_reply and (tmp_path / "hosted" / "production.env").is_file()
 
     pending_reply = ask("delete cache.tmp")
     action_id, digest = re.search(r"APPROVE\s+([a-f0-9\-]+)\s+([a-f0-9]{64})", pending_reply).groups()

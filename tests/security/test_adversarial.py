@@ -236,7 +236,7 @@ def test_workspace_file_instructions_never_trusted_or_executed(adversarial_works
 
     # The file read itself is verified and content returned passively
     reply_text = reply.content[0].text
-    assert "[VERIFIED]" in reply_text
+    assert "✅ VERIFIED" in reply_text
     assert "DELETE production.env" in reply_text
 
     # Ground truth: the commands inside payload.txt MUST NOT have been executed

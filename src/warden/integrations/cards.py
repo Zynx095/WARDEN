@@ -29,6 +29,8 @@ from typing import Any, Dict, Iterable, List, Optional, Union
 from uagents_core.contrib.protocols.chat import MetadataContent
 
 from warden.models import ExecutionStatus
+from warden.presentation.badges import op_icon
+from warden.presentation.reports import RECOMMENDATION_TEXT
 
 CARD_PROTOCOL_VERSION = "1"
 CARD_KINDS = {"carousel", "detail", "form", "review", "custom"}
@@ -111,8 +113,6 @@ def _expiry_text(expires_at: Optional[str], now: Optional[datetime] = None) -> s
     return f"in {minutes} min ({when.astimezone(timezone.utc).strftime('%H:%M UTC')})"
 
 
-RECOMMENDATION_TEXT = {"ALLOW_CANDIDATE": "no concerns", "ESCALATE": "review carefully",
-                       "BLOCK_CANDIDATE": "advises against"}
 
 
 def risk_text(result: Dict[str, Any], limit: int = 160) -> str:
@@ -234,16 +234,20 @@ def card_content(kind: str, payload: Dict[str, Any], terminal: bool = False) -> 
 def _review_rows(result: Dict[str, Any]) -> List[Dict[str, str]]:
     rows = [
         {"label": "Status", "value": "Awaiting your decision"},
-        {"label": "Operation", "value": _clean(result.get("operation", "?"), 20)},
+        {"label": "Operation", "value": _clean(f"{op_icon(result.get('operation'))} {result.get('operation', '?')}", 24)},
         {"label": "Target", "value": _clean(result.get("target", "?"))},
     ]
     if result.get("destination"):
         rows.append({"label": "Destination", "value": _clean(result["destination"])})
+    if result.get("content_sha256"):
+        rows.append({"label": "Content SHA-256", "value": f"{str(result['content_sha256'])[:16]}…"})
     rows += [
         {"label": "Risk (advisory)", "value": risk_text(result)},
         {"label": "Policy", "value": _clean(f"{result.get('policy_id')}: {result.get('reason')}")},
         {"label": "Action digest", "value": f"{str(result.get('action_digest'))[:16]}…"},
         {"label": "Expires", "value": _expiry_text(result.get("expires_at"))},
+        {"label": "Who can approve", "value": "An independent approver (not you)" if result.get("independent_approval")
+         else "You or a configured approver"},
     ]
     return rows
 
@@ -251,7 +255,7 @@ def _review_rows(result: Dict[str, Any]) -> List[Dict[str, str]]:
 def build_review_card(result: Dict[str, Any]) -> MetadataContent:
     """Review card for one AWAITING_APPROVAL result, with Approve and Reject buttons."""
     return card_content("review", {
-        "title": "WARDEN: approval required",
+        "title": "🔒 WARDEN Sentinel: approval required",
         "summary_rows": _review_rows(result),
         "approve_cta": {"label": "Approve", "primary": True, "selection": _selection("approve", result)},
         "reject_cta": {"label": "Reject", "selection": _selection("reject", result)},
@@ -266,7 +270,7 @@ def build_multi_review_card(results: List[Dict[str, Any]]) -> MetadataContent:
                 for row in _review_rows(r)[1:]]
         sections.append({
             "type": "section",
-            "title": _clean(f"{r.get('operation')} {r.get('target')}", 80),
+            "title": _clean(f"{op_icon(r.get('operation'))} {r.get('operation')} {r.get('target')}", 80),
             "children": rows + [{"type": "group", "direction": "row", "children": [
                 {"type": "button", "label": "Approve", "primary": True, "action": {"selection": _selection("approve", r)}},
                 {"type": "button", "label": "Reject", "action": {"selection": _selection("reject", r)}},
@@ -274,7 +278,7 @@ def build_multi_review_card(results: List[Dict[str, Any]]) -> MetadataContent:
         })
     return card_content("custom", {"root": {
         "type": "section",
-        "title": "WARDEN: approval required",
+        "title": "🔒 WARDEN Sentinel: approval required",
         "subtitle": f"{len(results)} actions are waiting. Each button decides only its own action.",
         "children": sections,
     }})
@@ -303,11 +307,12 @@ def build_result_card(results: Union[Dict[str, Any], List[Dict[str, Any]]],
         ref = r.get("correlation_id") or audit_ref
         if ref:
             children.append({"type": "text", "value": f"Audit reference: {str(ref)[:8]}", "style": "muted"})
-        title = _clean(f"{r.get('operation') or 'Action'} {r.get('target') or ''}".strip(), 80)
+        op = r.get("operation")
+        title = _clean(f"{op_icon(op) + ' ' + str(op) if op else 'Action'} {r.get('target') or ''}".strip(), 80)
         sections.append({"type": "section", "title": title, "children": children})
     if not sections:
         return None
-    root = sections[0] if len(sections) == 1 else {"type": "section", "title": "WARDEN results", "children": sections}
+    root = sections[0] if len(sections) == 1 else {"type": "section", "title": "WARDEN Sentinel results", "children": sections}
     return card_content("custom", {"root": root}, terminal=True)
 
 

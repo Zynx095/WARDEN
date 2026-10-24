@@ -33,6 +33,7 @@ from warden.integrations.cards import (
     validate_card_metadata,
 )
 from warden.models import Action, Decision, ExecutionStatus
+from warden.presentation.reports import format_decision_report, format_no_action, format_pipeline_report
 
 logger = logging.getLogger(__name__)
 
@@ -227,13 +228,8 @@ class WardenACPHandler:
         proposed_actions = self.intent_engine.parse_intent(user_text, context=context)
 
         if not proposed_actions:
-            reply_text = (
-                "WARDEN Active Defense Agent:\n"
-                f"Understood request: '{user_text}'\n"
-                "No filesystem mutations or tool operations were proposed for this input.\n"
-                "Available operations: READ, CREATE, WRITE, DELETE, RENAME."
-            )
-            return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
+            # The user's text is echoed sanitized and bounded, never raw.
+            return ack, ChatMessage(content=[TextContent(type="text", text=self._scrub(format_no_action(user_text)))])
 
         # 5. Evaluate and execute proposed actions through WARDEN's pipeline
         results: List[Dict[str, Any]] = []
@@ -288,120 +284,13 @@ class WardenACPHandler:
         return self._message(text, [build_result_card(result)] if self.interactive_cards else ())
 
     def _format_approval_response(self, action_id: str, res: Dict[str, Any]) -> str:
-        """Format the response after a human approval decision."""
-        if res.get("refused"):
-            return f"[WARDEN] Approval refused for `{action_id[:8]}`: {res.get('error')}"
-        if res.get("status") == ExecutionStatus.REJECTED:
-            return (
-                f"[WARDEN] Action REJECTED\n"
-                f"- Action ID: `{action_id}`\n"
-                f"- Status: `REJECTED`\n"
-                f"- Nothing was executed. The request is closed and cannot be approved later.\n"
-            )
-        if res.get("status") == ExecutionStatus.EXPIRED:
-            return (
-                f"[WARDEN] Approval EXPIRED\n"
-                f"- Action ID: `{action_id}`\n"
-                f"- Status: `EXPIRED`\n"
-                f"- This request expired before a decision arrived; nothing was executed. "
-                f"Ask again to get a fresh request.\n"
-            )
-        if res.get("status") == ExecutionStatus.VERIFIED:
-            return (
-                f"[WARDEN] Action Approval Execution Verified\n"
-                f"- Action ID: `{action_id}`\n"
-                f"- Status: `VERIFIED`\n"
-                f"- Execution: Successfully executed.\n"
-                f"- Physical Verification: {res.get('verification_details')}\n"
-            )
-        elif res.get("status") == ExecutionStatus.UNVERIFIED:
-            return (
-                f"[WARDEN] Action Executed but UNVERIFIED\n"
-                f"- Action ID: `{action_id}`\n"
-                f"- Status: `UNVERIFIED`\n"
-                f"- The action ran, but its outcome could NOT be independently confirmed.\n"
-                f"- Detail: {res.get('verification_details')}\n"
-            )
-        else:
-            return (
-                f"[WARDEN] Action Approval Execution Failed\n"
-                f"- Action ID: `{action_id}`\n"
-                f"- Status: `{_status_label(res.get('status'))}`\n"
-                f"- Error: {res.get('error')}\n"
-            )
+        """Text for an approve/reject decision (presentation only; see warden.presentation.reports)."""
+        return format_decision_report(action_id, res)
 
     def _format_pipeline_response(self, prompt: str, results: List[Dict[str, Any]]) -> str:
-        """Format structured verification details for ASI:One chat."""
-        lines = [
-            f"[WARDEN] Action Verification Report",
-            f"Query: \"{prompt}\"",
-            f"Evaluated {len(results)} proposed operation(s):\n",
-        ]
+        """Text for a new request: one block per proposed action, with its trace."""
+        return format_pipeline_report(prompt, results)
 
-        for idx, r in enumerate(results, 1):
-            status = r.get("status")
-            action_id = r.get("action_id", "unknown")
-            risk_line = (f"\n   - **Risk (advisory, not an authorization):** {_display(risk_text(r, 200))}"
-                         if isinstance(r.get("risk"), dict) else "")
-
-            if status == ExecutionStatus.VERIFIED:
-                line_parts = [
-                    f"**{idx}. [VERIFIED]** Action `{action_id[:8]}`",
-                    f"   - **Result:** Successfully executed and ground-truth verified.",
-                    f"   - **Details:** {r.get('verification_details')}",
-                ]
-                if risk_line:
-                    line_parts.append(risk_line.lstrip("\n"))
-                output = r.get("output")
-                if output is not None and str(output).strip() != "":
-                    if "\n" in str(output):
-                        line_parts.append(f"   - **Output:**\n{output}")
-                    else:
-                        line_parts.append(f"   - **Output:** {output}")
-                lines.append("\n".join(line_parts))
-            elif status == ExecutionStatus.UNVERIFIED:
-                lines.append(
-                    f"**{idx}. [UNVERIFIED]** Action `{action_id[:8]}`\n"
-                    f"   - **Result:** Executed, but the outcome could NOT be independently confirmed.\n"
-                    f"   - **Details:** {r.get('verification_details')}{risk_line}"
-                )
-            elif status == ExecutionStatus.BLOCKED:
-                lines.append(
-                    f"**{idx}. [BLOCKED]** Action `{action_id[:8]}`\n"
-                    f"   - **Policy:** `{r.get('policy_id')}`\n"
-                    f"   - **Reason:** {r.get('reason')}\n"
-                    f"   - **Security Guarantee:** Prohibited operation was blocked before execution.{risk_line}"
-                )
-            elif status == ExecutionStatus.AWAITING_APPROVAL:
-                pending_id = r.get("pending_id", action_id)
-                detail = [
-                    f"**{idx}. [AWAITING APPROVAL]** Action `{action_id[:8]}`",
-                    f"   - **Policy:** `{r.get('policy_id')}` (Destructive Action)",
-                    f"   - **Reason:** {r.get('reason')}",
-                    f"   - **Operation:** `{_display(r.get('operation', '?'))}`",
-                    f"   - **Target:** `{_display(r.get('target', '?'))}`",
-                ]
-                if r.get("destination"):
-                    detail.append(f"   - **Destination:** `{_display(r['destination'])}`")
-                if r.get("content_sha256"):
-                    detail.append(f"   - **Content SHA-256:** `{r['content_sha256']}`")
-                detail.append(f"   - **Action digest:** `{r.get('action_digest')}`")
-                if r.get("expires_at"):
-                    detail.append(f"   - **Expires:** {r['expires_at']}")
-                if risk_line:
-                    detail.append(risk_line.lstrip("\n"))
-                detail.append(
-                    "   - **Action Required:** Operation paused. To authorize exactly this action, reply with:\n"
-                    f"     `APPROVE {pending_id} {r.get('action_digest')}`"
-                )
-                lines.append("\n".join(detail))
-            else:
-                lines.append(
-                    f"**{idx}. [FAILED]** Action `{action_id[:8]}`\n"
-                    f"   - **Error:** {r.get('error', 'Execution or verification failed.')}{risk_line}"
-                )
-
-        return "\n".join(lines)
 
 
 def create_acp_protocol(

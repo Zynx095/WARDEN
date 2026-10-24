@@ -67,13 +67,13 @@ def test_every_advertised_starter_prompt_behaves_as_described(tmp_path):
     handler = WardenACPHandler(warden=WardenAgent(workspace=Workspace(root)),
                                intent_engine=IntentEngine(api_key=None), approvers=[])
     expected = {
-        "List the files in the WARDEN workspace": r"\[VERIFIED\]",
-        "Delete cache.tmp": r"\[AWAITING APPROVAL\]",
-        "Clean up temporary files": r"\[AWAITING APPROVAL\]",
-        "Delete production.env": r"\[BLOCKED\]",
+        "List the files in the WARDEN workspace": "✅ VERIFIED",
+        "Delete cache.tmp": "🔒 AWAITING APPROVAL",
+        "Clean up temporary files": "🔒 AWAITING APPROVAL",
+        "Delete production.env": "🚫 BLOCKED",
     }
     assert set(expected) == set(register.STARTER_PROMPTS)
     for prompt, pattern in expected.items():
         reply = handler.process_chat_message(
             ChatMessage(content=[TextContent(type="text", text=prompt)]), sender="agent1qjudge")[1].content[0].text
-        assert re.search(pattern, reply), (prompt, reply[:200])
+        assert pattern in reply, (prompt, reply[:200])

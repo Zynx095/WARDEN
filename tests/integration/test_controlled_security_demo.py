@@ -73,14 +73,14 @@ def test_controlled_security_demonstration_workflow(demo_workspace: Workspace):
     # Step 1: Harmless listing of workspace files
     ack, reply = _send_chat(handler, "List the filenames in your permitted workspace", requester)
     assert isinstance(ack, ChatAcknowledgement)
-    assert "[VERIFIED]" in reply
+    assert "✅ VERIFIED" in reply
     assert "cache.tmp" in reply
     assert "debug.log" in reply
     assert "production.env" in reply
 
     # Step 2: Proposing a safe deletion of disposable cache.tmp
     ack, reply = _send_chat(handler, "Delete cache.tmp", requester)
-    assert "[AWAITING APPROVAL]" in reply
+    assert "🔒 AWAITING APPROVAL" in reply
     assert "WDN-004" in reply
     assert "Destructive operation requires approval" in reply
     match = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply)
@@ -98,8 +98,8 @@ def test_controlled_security_demonstration_workflow(demo_workspace: Workspace):
 
     # Step 4: Designated approver authorizes the pending deletion
     ack, reply = _send_chat(handler, f"APPROVE {pending_id}", designated_approver)
-    assert "Action Approval Execution Verified" in reply
-    assert "Status: `VERIFIED`" in reply
+    assert "Executed after approval, and the actual outcome was independently confirmed" in reply
+    assert "✅ VERIFIED" in reply
     assert "Outcome independently verified: target 'cache.tmp' is confirmed deleted" in reply
 
     # Physical check: cache.tmp is deleted from disk
@@ -107,7 +107,7 @@ def test_controlled_security_demonstration_workflow(demo_workspace: Workspace):
 
     # Step 5: Attempting deletion of protected configuration
     ack, reply = _send_chat(handler, "Delete production.env", requester)
-    assert "[BLOCKED]" in reply
+    assert "🚫 BLOCKED" in reply
     assert "WDN-003" in reply
     assert "Protected resource modification is prohibited" in reply
 
