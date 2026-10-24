@@ -213,7 +213,7 @@ def run_network(cfg, hosted, warden_id, analyst_id, client_id, warden_port, clie
     text, (result,) = ask(json.dumps(selection))
     assert "VERIFIED" in text and "Independently attested by the trusted remote auditor" in text
     assert result["is_terminal"] == "true" and '"label":"VERIFIED"' in result["card_payload"]
-    assert "Risk analysis (advisory): HIGH" in result["card_payload"]
+    assert "- **Risk (advisory):** HIGH" in text and "Risk" not in result["card_payload"]  # evidence stays in text
     assert not (cfg.workspace_root / "debug.log").exists() and (cfg.workspace_root / "cache.tmp").is_file()
     events = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
     (final,) = [e for e in events if e["correlation_id"] == selection["action_id"]

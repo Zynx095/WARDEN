@@ -57,13 +57,27 @@ def test_review_card_matches_documented_protocol():
 def test_review_card_shows_short_digest_but_binds_full_digest_in_selection():
     p = payload(build_review_card(pending()))
     rows = {r["label"]: r["value"] for r in p["summary_rows"]}
-    assert rows["Operation"] == "🗑️ DELETE" and rows["Target"] == "cache.tmp"
-    assert rows["Action digest"] == DIGEST[:16] + "…"
+    assert p["title"] == "WARDEN Sentinel — Approval required"
+    assert rows["Status"] == "Awaiting an authorized decision. Nothing has run."
+    assert rows["Operation"] == "DELETE" and rows["Target"] == "cache.tmp"
+    assert rows["If approved"] == "Permanently deletes cache.tmp"
+    assert rows["Policy"] == "WDN-004 — Destructive action: explicit human approval required"
+    assert rows["Action ID"] == ACTION_ID and rows["Action digest"] == DIGEST[:16] + "…"
     assert rows["Expires"].startswith("in ") and "UTC" in rows["Expires"]
-    assert "WDN-004" in rows["Policy"] and rows["Risk (advisory)"] == "Not assessed"
+    assert rows["Approver"] == "You or a configured approver" and rows["Risk (advisory)"] == "Not assessed"
     for cta, decision in (("approve_cta", "approve"), ("reject_cta", "reject")):
         assert p[cta]["selection"] == {"warden": SELECTION_SCHEMA, "decision": decision,
                                        "action_id": ACTION_ID, "digest": DIGEST}
+
+
+def test_review_card_rows_go_from_what_and_why_to_who_and_identifiers():
+    labels = [r["label"] for r in payload(build_review_card(pending(
+        operation="RENAME", target="a.txt", destination="b.txt", independent_approval=True)))["summary_rows"]]
+    assert labels == ["Status", "Operation", "Target", "Destination", "If approved", "Policy", "Risk (advisory)",
+                      "Approver", "Expires", "Action ID", "Action digest"]
+    rows = {r["label"]: r["value"] for r in payload(build_review_card(pending(
+        operation="RENAME", target="a.txt", destination="b.txt", independent_approval=True)))["summary_rows"]}
+    assert rows["If approved"] == "Renames a.txt to b.txt" and rows["Approver"] == "An independent approver (not you)"
 
 
 def test_review_card_carries_no_secret_token_or_content():
@@ -102,14 +116,44 @@ def test_multi_review_card_buttons_each_bind_only_their_own_action():
     (ExecutionStatus.FAILED, "warning"), (ExecutionStatus.UNVERIFIED, "warning"),
 ])
 def test_result_card_states_the_actual_status(status, variant):
-    card = build_result_card({"status": status, "operation": "DELETE", "target": "cache.tmp",
-                              "correlation_id": "c0ffee00-1111"})
+    card = build_result_card({"status": status, "operation": "DELETE", "target": "cache.tmp", "policy_id": "WDN-004",
+                              "correlation_id": "c0ffee00-1111", "risk": {"status": "ASSESSED", "risk_level": "HIGH"},
+                              "verification_details": "EVIDENCE"})
     md = card.metadata
     assert md["card_kind"] == "custom" and md["is_terminal"] == "true"
     root = payload(card)["root"]
+    assert root["title"] == "DELETE cache.tmp"
     badge = root["children"][0]
     assert badge == {"type": "badge", "label": status.value, "variant": variant}
-    assert any("Audit reference: c0ffee00" == c.get("value") for c in root["children"])
+    assert any(c.get("value") == "Policy: WDN-004 — Destructive action: explicit human approval required"
+               for c in root["children"])
+    # Glanceable only: the evidence, the advice and the audit reference are in the accompanying text.
+    raw = json.dumps(root)
+    assert "EVIDENCE" not in raw and "c0ffee00" not in raw and "Risk" not in raw
+
+
+@pytest.mark.parametrize("fields,explanation", [
+    ({"status": ExecutionStatus.FAILED, "refused": True, "decided": True}, "The decision was refused. Nothing was executed."),
+    ({"status": ExecutionStatus.FAILED, "decided": True}, "The decision was refused. Nothing was executed."),
+    ({"status": ExecutionStatus.FAILED, "execution_attempted": True}, "Execution failed. No success is claimed."),
+    ({"status": ExecutionStatus.FAILED, "execution_attempted": True, "executed": True},
+     "It ran, but verification found a problem. No success is claimed."),
+    ({"status": ExecutionStatus.FAILED}, "Not completed. No success is claimed."),
+])
+def test_failed_result_card_says_whether_anything_ran(fields, explanation):
+    root = payload(build_result_card({"operation": "DELETE", "target": "cache.tmp", **fields}))["root"]
+    assert root["children"][1] == {"type": "text", "value": explanation, "style": "emphasis"}
+
+
+def test_result_card_for_an_unknown_action_names_its_id():
+    root = payload(build_result_card({"status": ExecutionStatus.FAILED, "refused": True, "action_id": ACTION_ID}))["root"]
+    assert root["title"] == f"Action {ACTION_ID[:8]}"
+
+
+def test_card_text_has_no_decorative_emoji():
+    for card in (build_review_card(pending()), build_result_card({"status": ExecutionStatus.VERIFIED,
+                                                                   "operation": "READ", "target": "a.txt"})):
+        assert not any(ord(ch) >= 0x2500 and ch != "…" for ch in card.metadata["card_payload"])
 
 
 def test_unverified_result_is_never_presented_as_success():
