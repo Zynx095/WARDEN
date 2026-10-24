@@ -303,10 +303,12 @@ def create_acp_protocol(
     warden: WardenAgent,
     intent_engine: Optional[IntentEngine] = None,
     interactive_cards: Optional[bool] = None,
+    approval_mode: Optional[str] = None,
 ) -> Protocol:
     """Create a uAgents Protocol implementing the official Agent Chat Protocol."""
     proto = Protocol(spec=chat_protocol_spec)
-    handler = WardenACPHandler(warden=warden, intent_engine=intent_engine, interactive_cards=interactive_cards)
+    handler = WardenACPHandler(warden=warden, intent_engine=intent_engine, interactive_cards=interactive_cards,
+                               approval_mode=approval_mode)
 
     @proto.on_message(model=ChatMessage)
     async def handle_message(ctx: Context, sender: str, msg: ChatMessage):

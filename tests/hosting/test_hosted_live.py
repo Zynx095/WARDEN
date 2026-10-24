@@ -152,6 +152,7 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
     health = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{warden_port}{HEALTH_ROUTE}", timeout=5).read())
     assert health["status"] == "ok" and health["workspace_ready"] is True
     assert health["agent_address"] == warden_id.address
+    assert health["approval_mode"] == "self" and health["durable_state"] is True and health["risk_analyst"] == "local"
     assert str(tmp_path) not in json.dumps(health)
 
     blocked_reply = ask("delete production.env")

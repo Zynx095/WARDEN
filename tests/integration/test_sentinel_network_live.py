@@ -128,6 +128,7 @@ def test_full_sentinel_network_round_trip(tmp_path, monkeypatch, offline):
         "WARDEN_REMOTE_AUDITOR": "true", "WARDEN_AUDITOR_ADDRESS": auditor_id.address,
         "WARDEN_AUDITOR_ENDPOINT": url(auditor_port), "WARDEN_AUDITOR_TIMEOUT_SECONDS": "10",
         "WARDEN_HOSTED_ALLOW_INSECURE_ENDPOINT": "true", "WARDEN_AUDIT_LOG": str(tmp_path / "audit.jsonl"),
+        "WARDEN_APPROVAL_MODE": "self", "WARDEN_STATE_DB": str(tmp_path / "state" / "warden.db"),
     }.items():
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(warden.config, "_DEFAULT_CONFIG", None)
