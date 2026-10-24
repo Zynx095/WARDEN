@@ -239,6 +239,72 @@ def test_cards_never_include_the_workspace_path(root):
             assert str(root).replace("\\", "\\\\") not in card.metadata["card_payload"]
 
 
+def test_blocked_actions_own_id_cannot_be_approved_by_a_card(root):
+    warden, h = make(root)
+    send(h, "delete production.env")
+    (blocked_id,) = {e.correlation_id for e in warden.audit_logger.get_events(status=ExecutionStatus.BLOCKED)}
+    forged = {"warden": SELECTION_SCHEMA, "decision": "approve", "action_id": blocked_id,
+              "digest": "ab" * 32}
+    assert result_badge(click(h, forged)) == "FAILED" and (root / "production.env").is_file()
+
+
+def test_selection_carried_in_metadata_content_decides_nothing(root):
+    # Only the documented route (a selection returned as chat text) is interpreted. A client
+    # cannot smuggle a decision through MetadataContent fields.
+    warden, h = make(root)
+    sel = review_selection(send(h, "delete cache.tmp"))
+    smuggled = {"card_action_payload": json.dumps(sel), "action": "APPROVE",
+                "action_id": sel["action_id"], "action_digest": sel["digest"]}
+    msg = ChatMessage(content=[TextContent(type="text", text="ok"), MetadataContent(metadata=smuggled)])
+    h.process_chat_message(msg, sender=USER)
+    assert warden.auth_manager.get_pending_approval(sel["action_id"]) is not None
+    assert (root / "cache.tmp").is_file()
+
+
+def test_unauthorized_sender_cannot_reject_someone_elses_request(root):
+    _, h = make(root)
+    review = send(h, "delete cache.tmp")
+    assert result_badge(click(h, review_selection(review, "reject_cta"), sender=OTHER)) == "FAILED"
+    assert result_badge(click(h, review_selection(review))) == "VERIFIED"  # still the owner's to decide
+
+
+@pytest.mark.parametrize("command", ["REJECT {id}", "REJECT {id} " + "0" * 64])
+def test_reject_needs_the_exact_digest_and_a_refusal_does_not_consume_the_request(root, command):
+    warden, h = make(root)
+    sel = review_selection(send(h, "delete cache.tmp"))
+    reply = send(h, command.format(id=sel["action_id"]))
+    assert "REJECTED" not in text(reply)
+    assert warden.auth_manager.get_pending_approval(sel["action_id"]) is not None
+
+
+def test_approver_binding_lives_in_the_pending_record_not_in_adapter_memory(root):
+    # A fresh handler (e.g. a second protocol instance) has no in-memory owner map; the
+    # authorized-approver set bound into the pending record must still refuse other senders.
+    warden, h = make(root)
+    sel = review_selection(send(h, "delete cache.tmp"))
+    fresh = WardenACPHandler(warden=warden, intent_engine=IntentEngine(api_key=None), approvers=[],
+                             interactive_cards=True)
+    assert result_badge(click(fresh, sel, sender=OTHER)) == "FAILED"
+    assert (root / "cache.tmp").is_file()
+    assert result_badge(click(fresh, sel)) == "VERIFIED"
+
+
+def test_cards_never_carry_file_contents_tokens_or_signing_material(root):
+    warden, h = make(root)
+    (root / "notes.txt").write_text("CARD-LEAK-CANARY-7731")
+    secret = warden.auth_manager.secret_key.decode()
+    payloads = []
+    for msg in ("read notes.txt", "read README.txt", "delete cache.tmp"):
+        reply = send(h, msg)
+        assert isinstance(reply.content[0], TextContent) and text(reply).startswith("[WARDEN]")
+        payloads += [c.metadata["card_payload"] for c in cards(reply)]
+    sel = review_selection(send(h, "delete debug.log"))
+    payloads += [c.metadata["card_payload"] for c in cards(click(h, sel))]
+    blob = "\n".join(payloads)
+    assert "CARD-LEAK-CANARY-7731" not in blob and "synthetic test data" not in blob
+    assert secret not in blob and "signature" not in blob and "token" not in blob.lower()
+
+
 def test_with_cards_disabled_replies_are_text_only_and_selections_decide_nothing(root):
     warden, h = make(root, cards=False)
     reply = send(h, "delete cache.tmp")
