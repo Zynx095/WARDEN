@@ -111,6 +111,20 @@ def _expiry_text(expires_at: Optional[str], now: Optional[datetime] = None) -> s
     return f"in {minutes} min ({when.astimezone(timezone.utc).strftime('%H:%M UTC')})"
 
 
+RECOMMENDATION_TEXT = {"PROCEED": "no concerns", "REVIEW": "review carefully", "DO_NOT_PROCEED": "advises against"}
+
+
+def risk_text(result: Dict[str, Any], limit: int = 160) -> str:
+    """One line describing the advisory risk assessment of a result. Never an authorization."""
+    risk = result.get("risk")
+    if not isinstance(risk, dict):
+        return "Not assessed"
+    if risk.get("status") != "ASSESSED":
+        return _clean(f"Unavailable: {risk.get('summary') or 'no assessment'}", limit)
+    advice = RECOMMENDATION_TEXT.get(str(risk.get("recommendation")), "advisory")
+    return _clean(f"{risk.get('risk_level')} ({advice}): {risk.get('summary') or ''}", limit)
+
+
 def _selection(decision: str, result: Dict[str, Any]) -> Dict[str, str]:
     return {
         "warden": SELECTION_SCHEMA,
@@ -225,7 +239,7 @@ def _review_rows(result: Dict[str, Any]) -> List[Dict[str, str]]:
     if result.get("destination"):
         rows.append({"label": "Destination", "value": _clean(result["destination"])})
     rows += [
-        {"label": "Risk", "value": "High: destructive change"},
+        {"label": "Risk (advisory)", "value": risk_text(result)},
         {"label": "Policy", "value": _clean(f"{result.get('policy_id')}: {result.get('reason')}")},
         {"label": "Action digest", "value": f"{str(result.get('action_digest'))[:16]}…"},
         {"label": "Expires", "value": _expiry_text(result.get("expires_at"))},
@@ -282,6 +296,9 @@ def build_result_card(results: Union[Dict[str, Any], List[Dict[str, Any]]],
         ]
         if detail:
             children.append({"type": "text", "value": _clean(detail, 300), "style": "body"})
+        if isinstance(r.get("risk"), dict):
+            children.append({"type": "text", "value": f"Risk analysis (advisory): {risk_text(r, 200)}",
+                             "style": "muted"})
         ref = r.get("correlation_id") or audit_ref
         if ref:
             children.append({"type": "text", "value": f"Audit reference: {str(ref)[:8]}", "style": "muted"})

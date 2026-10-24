@@ -29,6 +29,7 @@ from warden.integrations.cards import (
     build_result_card,
     cards_for_results,
     parse_card_decision,
+    risk_text,
     validate_card_metadata,
 )
 from warden.models import Action, Decision, ExecutionStatus
@@ -220,7 +221,10 @@ class WardenACPHandler:
         self._prune_approval_owners()
         for action in proposed_actions:
             # Bind who may decide into the pending record itself, so every decision channel is held to it.
-            res = self.warden.handle_action_request(action, authorized_approvers={sender} | self.approvers)
+            res = self.warden.handle_action_request(
+                action, authorized_approvers={sender} | self.approvers,
+                request_text=user_text, batch_size=len(proposed_actions),
+            )
             if res.get("status") == ExecutionStatus.AWAITING_APPROVAL:
                 self._approval_owners[res.get("pending_id", action.action_id)] = sender
             results.append(res)
@@ -315,6 +319,8 @@ class WardenACPHandler:
         for idx, r in enumerate(results, 1):
             status = r.get("status")
             action_id = r.get("action_id", "unknown")
+            risk_line = (f"\n   - **Risk (advisory, not an authorization):** {_display(risk_text(r, 200))}"
+                         if isinstance(r.get("risk"), dict) else "")
 
             if status == ExecutionStatus.VERIFIED:
                 line_parts = [
@@ -322,6 +328,8 @@ class WardenACPHandler:
                     f"   - **Result:** Successfully executed and ground-truth verified.",
                     f"   - **Details:** {r.get('verification_details')}",
                 ]
+                if risk_line:
+                    line_parts.append(risk_line.lstrip("\n"))
                 output = r.get("output")
                 if output is not None and str(output).strip() != "":
                     if "\n" in str(output):
@@ -333,14 +341,14 @@ class WardenACPHandler:
                 lines.append(
                     f"**{idx}. [UNVERIFIED]** Action `{action_id[:8]}`\n"
                     f"   - **Result:** Executed, but the outcome could NOT be independently confirmed.\n"
-                    f"   - **Details:** {r.get('verification_details')}"
+                    f"   - **Details:** {r.get('verification_details')}{risk_line}"
                 )
             elif status == ExecutionStatus.BLOCKED:
                 lines.append(
                     f"**{idx}. [BLOCKED]** Action `{action_id[:8]}`\n"
                     f"   - **Policy:** `{r.get('policy_id')}`\n"
                     f"   - **Reason:** {r.get('reason')}\n"
-                    f"   - **Security Guarantee:** Prohibited operation was blocked before execution."
+                    f"   - **Security Guarantee:** Prohibited operation was blocked before execution.{risk_line}"
                 )
             elif status == ExecutionStatus.AWAITING_APPROVAL:
                 pending_id = r.get("pending_id", action_id)
@@ -358,6 +366,8 @@ class WardenACPHandler:
                 detail.append(f"   - **Action digest:** `{r.get('action_digest')}`")
                 if r.get("expires_at"):
                     detail.append(f"   - **Expires:** {r['expires_at']}")
+                if risk_line:
+                    detail.append(risk_line.lstrip("\n"))
                 detail.append(
                     "   - **Action Required:** Operation paused. To authorize exactly this action, reply with:\n"
                     f"     `APPROVE {pending_id} {r.get('action_digest')}`"
@@ -366,7 +376,7 @@ class WardenACPHandler:
             else:
                 lines.append(
                     f"**{idx}. [FAILED]** Action `{action_id[:8]}`\n"
-                    f"   - **Error:** {r.get('error', 'Execution or verification failed.')}"
+                    f"   - **Error:** {r.get('error', 'Execution or verification failed.')}{risk_line}"
                 )
 
         return "\n".join(lines)

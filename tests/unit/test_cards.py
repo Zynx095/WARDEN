@@ -60,7 +60,7 @@ def test_review_card_shows_short_digest_but_binds_full_digest_in_selection():
     assert rows["Operation"] == "DELETE" and rows["Target"] == "cache.tmp"
     assert rows["Action digest"] == DIGEST[:16] + "…"
     assert rows["Expires"].startswith("in ") and "UTC" in rows["Expires"]
-    assert "WDN-004" in rows["Policy"] and rows["Risk"].startswith("High")
+    assert "WDN-004" in rows["Policy"] and rows["Risk (advisory)"] == "Not assessed"
     for cta, decision in (("approve_cta", "approve"), ("reject_cta", "reject")):
         assert p[cta]["selection"] == {"warden": SELECTION_SCHEMA, "decision": decision,
                                        "action_id": ACTION_ID, "digest": DIGEST}
