@@ -213,6 +213,14 @@ class WardenACPHandler:
                 f"- Execution: Successfully executed.\n"
                 f"- Physical Verification: {res.get('verification_details')}\n"
             )
+        elif res.get("status") == ExecutionStatus.UNVERIFIED:
+            return (
+                f"[WARDEN] Action Executed but UNVERIFIED\n"
+                f"- Action ID: `{action_id}`\n"
+                f"- Status: `UNVERIFIED`\n"
+                f"- The action ran, but its outcome could NOT be independently confirmed.\n"
+                f"- Detail: {res.get('verification_details')}\n"
+            )
         else:
             return (
                 f"[WARDEN] Action Approval Execution Failed\n"
@@ -246,6 +254,12 @@ class WardenACPHandler:
                     else:
                         line_parts.append(f"   - **Output:** {output}")
                 lines.append("\n".join(line_parts))
+            elif status == ExecutionStatus.UNVERIFIED:
+                lines.append(
+                    f"**{idx}. [UNVERIFIED]** Action `{action_id[:8]}`\n"
+                    f"   - **Result:** Executed, but the outcome could NOT be independently confirmed.\n"
+                    f"   - **Details:** {r.get('verification_details')}"
+                )
             elif status == ExecutionStatus.BLOCKED:
                 lines.append(
                     f"**{idx}. [BLOCKED]** Action `{action_id[:8]}`\n"

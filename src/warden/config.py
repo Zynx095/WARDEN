@@ -9,6 +9,7 @@ working directory. Library code never loads ``.env`` implicitly.
 from __future__ import annotations
 
 import os
+import re
 import secrets
 from pathlib import Path
 from typing import Optional
@@ -98,6 +99,19 @@ def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return value
 
 
+AGENT_ADDRESS_PATTERN = re.compile(r"^agent1[a-z0-9]{50,70}$")
+
+
+def _auditor_address() -> Optional[str]:
+    """Address of the one remote Auditor whose attestations WARDEN will trust."""
+    raw = (os.getenv("WARDEN_AUDITOR_ADDRESS") or "").strip()
+    if not raw:
+        return None
+    if not AGENT_ADDRESS_PATTERN.match(raw):
+        raise ConfigError("WARDEN_AUDITOR_ADDRESS must be a uAgents address (agent1...).")
+    return raw
+
+
 def _log_level() -> str:
     level = os.getenv("WARDEN_LOG_LEVEL", "INFO").strip().upper() or "INFO"
     if level not in VALID_LOG_LEVELS:
@@ -154,6 +168,17 @@ class WardenConfig(BaseModel):
     max_pending_approvals: int = Field(
         default_factory=lambda: env_int("WARDEN_MAX_PENDING_APPROVALS", 50, 1, 10000)
     )
+    # Opt-in remote Auditor. Off unless explicitly enabled; enabling it requires a trusted address.
+    remote_auditor: bool = Field(default_factory=lambda: env_bool("WARDEN_REMOTE_AUDITOR", False))
+    auditor_address: Optional[str] = Field(default_factory=_auditor_address)
+    auditor_timeout_seconds: int = Field(
+        default_factory=lambda: env_int("WARDEN_AUDITOR_TIMEOUT_SECONDS", 10, 1, 120)
+    )
+
+    def __init__(self, **data) -> None:
+        super().__init__(**data)
+        if self.remote_auditor and not self.auditor_address:
+            raise ConfigError("WARDEN_REMOTE_AUDITOR=true requires WARDEN_AUDITOR_ADDRESS.")
     secret_key: str = Field(default_factory=_secret_key, repr=False)
 
 

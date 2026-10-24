@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from warden.audit.auditor import OutcomeAuditor
 from warden.audit.events import AuditLogger
-from warden.config import WardenConfig, get_config
+from warden.config import ConfigError, WardenConfig, get_config
 from warden.execution.executor import RestrictedExecutor
 from warden.execution.workspace import Workspace
 from warden.models import (
@@ -58,6 +58,7 @@ class WardenAgent:
         workspace: Optional[Workspace] = None,
         config: Optional[WardenConfig] = None,
         audit_log_file: Optional[Path] = None,
+        auditor: Optional[Any] = None,
     ) -> None:
         self.config = config or get_config()
         self.workspace = workspace or Workspace(self.config.workspace_root)
@@ -69,7 +70,10 @@ class WardenAgent:
             auth_manager=self.auth_manager,
             path_validator=self.path_validator,
         )
-        self.auditor = OutcomeAuditor(self.workspace, path_validator=self.path_validator)
+        if auditor is None and self.config.remote_auditor:
+            # Fail closed: never fall back to local-only verification when the operator asked for a remote one.
+            raise ConfigError("WARDEN_REMOTE_AUDITOR is enabled but no remote auditor was supplied.")
+        self.auditor = auditor or OutcomeAuditor(self.workspace, path_validator=self.path_validator)
         self.audit_logger = AuditLogger(audit_log_file)
 
     def _bind(self, action: Action) -> Optional[ActionBinding]:
@@ -253,9 +257,7 @@ class WardenAgent:
         # Step 5: Independent Outcome Verification
         verification: VerificationResult = self.auditor.verify_outcome(action, exec_result, pre_state)
 
-        final_status = (
-            ExecutionStatus.VERIFIED if verification.verified else ExecutionStatus.FAILED
-        )
+        final_status = self._final_status(verification)
 
         self.audit_logger.record(
             AuditEvent(
@@ -264,7 +266,7 @@ class WardenAgent:
                 target=action.target,
                 destination=action.destination,
                 execution_status=final_status,
-                verification_status="VERIFIED" if verification.verified else "FAILED",
+                verification_status=final_status.value,
                 metadata={
                     "action_digest": binding.action_digest,
                     "details": verification.details,
@@ -283,6 +285,15 @@ class WardenAgent:
             "verification_details": verification.details,
             "observed_state": verification.observed_state,
         }
+
+    @staticmethod
+    def _final_status(verification: VerificationResult) -> ExecutionStatus:
+        """VERIFIED only on a positive verification; an unconfirmed outcome is UNVERIFIED, never VERIFIED."""
+        if verification.verified:
+            return ExecutionStatus.VERIFIED
+        if verification.status == ExecutionStatus.UNVERIFIED:
+            return ExecutionStatus.UNVERIFIED
+        return ExecutionStatus.FAILED
 
     def _refuse(self, action: Action, correlation_id: str, reason: str) -> Dict[str, Any]:
         """Fail closed: record why nothing was authorized or approved and report a FAILED result."""
@@ -362,9 +373,7 @@ class WardenAgent:
             }
 
         verification = self.auditor.verify_outcome(action, exec_result, pre_state)
-        final_status = (
-            ExecutionStatus.VERIFIED if verification.verified else ExecutionStatus.FAILED
-        )
+        final_status = self._final_status(verification)
 
         self.audit_logger.record(
             AuditEvent(
@@ -373,7 +382,7 @@ class WardenAgent:
                 target=action.target,
                 destination=action.destination,
                 execution_status=final_status,
-                verification_status="VERIFIED" if verification.verified else "FAILED",
+                verification_status=final_status.value,
                 metadata={
                     "approved_by": approver_id,
                     "action_digest": binding.action_digest,
