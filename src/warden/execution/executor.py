@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 from typing import Optional
 from warden.models import (
@@ -37,6 +38,33 @@ class RestrictedExecutor:
         self.workspace = workspace
         self.auth_manager = auth_manager or AuthorizationManager()
         self.path_validator = path_validator or PathValidator(self.workspace.root_path)
+
+    def _substitution(self, requested: str, canonical: Path, allow_root: bool) -> Optional[str]:
+        """Reason the path no longer means what was authorized, or None if it still does."""
+        again = self.path_validator.validate_path(requested, allow_root=allow_root)
+        if not again.is_safe or again.canonical_path != canonical:
+            return "Target changed during execution checks (path no longer resolves to the authorized location)."
+        if canonical.is_symlink():
+            return "Target became a symbolic link after authorization; refusing to follow it."
+        return None
+
+    @staticmethod
+    def _atomic_write(path: Path, data: bytes) -> None:
+        """Write to a temporary file in the same directory and replace the target in one step,
+        so a failure never leaves a half-written file."""
+        fd, tmp = tempfile.mkstemp(prefix=".warden-", suffix=".tmp", dir=str(path.parent))
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Execute a requested operation subject to strict authorization and boundary checks."""
@@ -120,7 +148,15 @@ class RestrictedExecutor:
                 error=f"Authorization rejected: {auth_err}",
             )
 
-        # 6. Controlled execution with fail-closed error handling
+        # 6. Revalidate immediately before touching anything: the path must still resolve to the
+        #    same canonical location and must not have been swapped for a symlink since validation.
+        substituted = self._substitution(action.target, target_path, allow_root)
+        if substituted is None and destination_path is not None:
+            substituted = self._substitution(action.destination, destination_path, False)
+        if substituted:
+            return ExecutionResult(action=action, status=ExecutionStatus.FAILED, success=False, error=substituted)
+
+        # 7. Controlled execution with fail-closed error handling
         try:
             if op == ActionType.READ.value:
                 if not target_path.exists():
@@ -175,7 +211,9 @@ class RestrictedExecutor:
                     )
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 content = action.content if action.content is not None else ""
-                target_path.write_bytes(content.encode("utf-8"))
+                # Exclusive create: if anything appeared at the path since the checks, fail.
+                with open(target_path, "xb") as f:
+                    f.write(content.encode("utf-8"))
                 return ExecutionResult(
                     action=action,
                     status=ExecutionStatus.EXECUTED,
@@ -186,7 +224,7 @@ class RestrictedExecutor:
             elif op == ActionType.WRITE.value:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 content = action.content if action.content is not None else ""
-                target_path.write_bytes(content.encode("utf-8"))
+                self._atomic_write(target_path, content.encode("utf-8"))
                 return ExecutionResult(
                     action=action,
                     status=ExecutionStatus.EXECUTED,
@@ -222,6 +260,14 @@ class RestrictedExecutor:
                         error=f"Source file does not exist: {action.target}",
                     )
                 assert destination_path is not None
+                if destination_path.exists() or destination_path.is_symlink():
+                    # POSIX rename silently replaces the destination; never do that.
+                    return ExecutionResult(
+                        action=action,
+                        status=ExecutionStatus.FAILED,
+                        success=False,
+                        error=f"Rename destination already exists: {action.destination}",
+                    )
                 destination_path.parent.mkdir(parents=True, exist_ok=True)
                 target_path.rename(destination_path)
                 return ExecutionResult(
