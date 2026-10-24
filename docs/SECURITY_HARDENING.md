@@ -31,6 +31,17 @@ Everything here is implemented and covered by tests in this repository unless ma
 - Pending approvals, the dedup cache and the signing key are in memory only; the audit
   log is not tamper-evident.
 - Filenames and user text still reach the LLM intent prompt without provenance tagging.
+- Not production ready. There is no OS-level privilege isolation anywhere: WARDEN and the
+  Auditor are separate uAgent identities, but by default run as the same OS user on one
+  machine. External routing (Almanac/mailbox/remote endpoints), multi-host deployment and
+  third-party agents are untested.
+- Remote verification blocks WARDEN's event loop for up to `WARDEN_AUDITOR_TIMEOUT_SECONDS`
+  (default 10 s) per mutating action; the wait is bounded, not asynchronous.
+- Paths are case-folded for digests and snapshots (verified on Windows, where lookups are
+  case-insensitive); case-sensitive filesystems are unsupported for remote mode.
+- Test hermeticity: the suite clears the security-relevant `WARDEN_*` variables per test;
+  `7fb3ec2` is an intermediate commit whose remote tests do not collect (the Auditor package
+  is adapted in the next commit), so use `fdfc42c` or `8cbda4a` and later as checkpoints.
 - The remote Auditor is tested only on loopback with throwaway identities; see
   `docs/AUDITOR_UAGENT.md` for its limits. Nothing here claims a tested integration with
   Claude Code or any external agent.
