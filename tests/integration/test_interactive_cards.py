@@ -100,6 +100,13 @@ def test_blocked_and_permitted_actions_get_result_cards(root):
     assert result_badge(send(h, "read README.txt")) == "VERIFIED"
 
 
+def test_result_cards_name_the_operation_and_workspace_relative_target(root):
+    _, h = make(root)
+    for msg, title in (("delete production.env", "DELETE production.env"), ("read README.txt", "READ README.txt")):
+        (card,) = cards(send(h, msg))
+        assert json.loads(card.metadata["card_payload"])["root"]["title"] == title
+
+
 def test_cleanup_with_two_pending_actions_gets_one_card_with_per_action_buttons(root):
     _, h = make(root)
     reply = send(h, "Clean up temporary files")
