@@ -136,7 +136,10 @@ def test_rogue_executor_collateral_damage_is_not_reported_as_success(ws, monkeyp
 def test_multiline_write_is_byte_exact_and_verified_end_to_end(ws):
     warden = WardenAgent(workspace=ws)
     content = "alpha\nbeta\ngamma\n"
-    result = warden.handle_action_request(Action(operation="WRITE", target="target.tmp", content=content))
+    pending = warden.handle_action_request(Action(operation="WRITE", target="target.tmp", content=content))
+    # target.tmp already exists, so the overwrite needs approval (WDN-005) before it runs.
+    assert pending["status"] == ExecutionStatus.AWAITING_APPROVAL and pending["policy_id"] == "WDN-005"
+    result = warden.approve_and_execute(pending["pending_id"], "alice", expected_digest=pending["action_digest"])
 
     assert result["status"] == ExecutionStatus.VERIFIED
     assert (ws.root_path / "target.tmp").read_bytes() == content.encode("utf-8")

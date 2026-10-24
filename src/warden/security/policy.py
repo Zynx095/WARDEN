@@ -119,7 +119,26 @@ class PolicyEngine:
                     context=context,
                 )
 
-        # 6. Destructive operations require explicit approval
+        # 6. Existing content is never replaced silently
+        target_path = target_val.canonical_path
+        if operation == "WRITE" and target_path is not None and target_path.exists():
+            return PolicyResult(
+                decision=Decision.REQUIRE_APPROVAL,
+                policy_id="WDN-005",
+                reason="Overwriting an existing file requires approval.",
+                context=context,
+            )
+        if operation == "RENAME":
+            dest_path = self.path_validator.validate_path(action.destination).canonical_path
+            if dest_path is not None and (dest_path.exists() or dest_path.is_symlink()):
+                return PolicyResult(
+                    decision=Decision.BLOCK,
+                    policy_id="WDN-005",
+                    reason="Rename destination already exists; replacing it by rename is prohibited.",
+                    context=context,
+                )
+
+        # 7. Destructive operations require explicit approval
         if operation in {"DELETE", "RENAME"}:
             return PolicyResult(
                 decision=Decision.REQUIRE_APPROVAL,
@@ -128,7 +147,7 @@ class PolicyEngine:
                 context=context,
             )
 
-        # 7. Baseline allow
+        # 8. Baseline allow
         return PolicyResult(
             decision=Decision.ALLOW,
             policy_id="WDN-000",
