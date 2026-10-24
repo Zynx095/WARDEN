@@ -44,7 +44,8 @@ class AuditRequest(BaseModel):
     expected_content_sha256: Optional[str] = None  # CREATE/WRITE post-condition
     workspace_id: str                             # sha256 of the canonical workspace root
     pre_state: Dict[str, Any] = Field(default_factory=dict)            # capture_target_state()
-    pre_parent_snapshot: Dict[str, List[Any]] = Field(default_factory=dict)  # name -> [is_dir,size,mtime_ns]
+    # workspace-relative directory ('' = root, lower-case) -> {entry name (lower) -> [is_dir, size, mtime_ns]}
+    pre_snapshots: Dict[str, Dict[str, List[Any]]] = Field(default_factory=dict)
     issued_at: str
     expires_at: str
 
@@ -61,7 +62,7 @@ class AuditAttestation(BaseModel):
     auditor_address: str
     verdict: Verdict
     post_state: Dict[str, Any] = Field(default_factory=dict)
-    post_parent_snapshot: Dict[str, List[Any]] = Field(default_factory=dict)
+    post_snapshots: Dict[str, Dict[str, List[Any]]] = Field(default_factory=dict)
     unexpected_changes: List[str] = Field(default_factory=list)
     details: str = ""
     observed_at: str
