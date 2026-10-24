@@ -56,7 +56,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         cfg = HostedConfig(use_mailbox=True) if args.mailbox else HostedConfig()
         if cfg.public_endpoint.startswith("http://"):
             raise ConfigError("Refusing to register a plain-http endpoint; Agentverse needs a public https URL.")
-        seed = validate_seed(os.getenv("AGENT_SEED"))
+        seed = validate_seed(os.getenv("AGENT_SEED") or os.getenv("AGENT_SEED_PHRASE"))
         registration = build_registration(cfg, args.readme)
     except (AgentIdentityError, ConfigError, ValueError) as exc:
         print(f"[CONFIGURATION ERROR] {exc}", file=sys.stderr)
@@ -71,7 +71,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("Dry run: nothing was sent.")
         return 0
 
-    api_key = (os.getenv("AGENTVERSE_API_KEY") or "").strip()
+    api_key = (os.getenv("AGENTVERSE_API_KEY") or os.getenv("AGENTVERSE_KEY") or os.getenv("AGENTVERSE_MAILBOX_KEY") or "").strip()
     if not api_key:
         print("[CONFIGURATION ERROR] AGENTVERSE_API_KEY is required to publish.", file=sys.stderr)
         return 1
