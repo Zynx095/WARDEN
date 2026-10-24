@@ -26,6 +26,7 @@ PROPOSAL_SCHEMA = "warden.intent.proposal.v1"
 MAX_PROPOSALS_PER_REQUEST = 10
 MAX_TARGET_CHARS = 400
 MAX_CONTENT_CHARS = 100_000
+OUTSIDE_PATH = re.compile(r"\.\.[\\/]|(^|\s)[\\/]\w|\b[a-zA-Z]:[\\/]")
 
 
 class ActionProposal(BaseModel):
@@ -101,6 +102,9 @@ class IntentAgent:
             named = bool(_name(action.target)) and _name(action.target) in lowered
             assumptions = [] if named or action.target.strip() in {".", "./"} else [
                 f"target {_name(action.target)} was inferred, not named in the request"]
+            if OUTSIDE_PATH.search(text or "") and not OUTSIDE_PATH.search(action.target):
+                assumptions.append("the request named a path outside the workspace; only the file name was kept, "
+                                   "inside the workspace")
             action = action.model_copy(update={"operation": action.operation.upper()})
             proposal = ActionProposal(
                 proposal_id=action.action_id,
