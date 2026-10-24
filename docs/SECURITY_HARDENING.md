@@ -17,6 +17,7 @@ Everything here is implemented and covered by tests in this repository unless ma
 | Deduplication scoped to `(sender, msg_id)` | `integrations/acp_adapter.py` | `integration/test_dedup_scoping.py` |
 | Advisory text (`reason`) cannot relax a block or skip approval | `security/policy.py` | `security/test_advisory_text_has_no_authority.py` |
 | Wire contract and fail-closed checker for a future out-of-process Auditor | `audit/attestation.py`, `docs/MULTI_AGENT_INTERFACE.md` | `unit/test_attestation.py` |
+| Opt-in remote Auditor (`WARDEN_REMOTE_AUDITOR`, off by default): VERIFIED needs local pass AND a valid signed attestation; timeout/forgery/replay/mismatch/unreachable give UNVERIFIED | `audit/remote.py`, `audit/request_builder.py`, `audit/transport.py`, `auditor/` | `integration/test_remote_auditor.py`, `integration/test_remote_auditor_live.py`, `auditor/` |
 
 ## Open (not addressed)
 
@@ -30,5 +31,6 @@ Everything here is implemented and covered by tests in this repository unless ma
 - Pending approvals, the dedup cache and the signing key are in memory only; the audit
   log is not tamper-evident.
 - Filenames and user text still reach the LLM intent prompt without provenance tagging.
-- No Auditor agent exists. Nothing in this repository claims a tested integration with
+- The remote Auditor is tested only on loopback with throwaway identities; see
+  `docs/AUDITOR_UAGENT.md` for its limits. Nothing here claims a tested integration with
   Claude Code or any external agent.

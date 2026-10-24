@@ -1,97 +1,60 @@
-# Auditor uAgent Feature Specification & Integration Guide
+# Remote Auditor (optional)
 
-## Overview
+Status: implemented and tested locally (in-process loopback and a real uAgents sync
+exchange over `127.0.0.1`). Not deployed, not registered on Agentverse, and not tested
+with any external agent.
 
-The **Auditor uAgent** is an optional, decoupled verification agent for the WARDEN system. It operates on an independent uAgent protocol (`WardenAuditorProtocol`), independently inspects the physical filesystem post-execution, verifies action digests to prevent in-flight tampering, detects collateral mutations outside the authorized scope, and issues structured attestations.
+## What it does
 
-The feature is **disabled by default**, preserving WARDEN's existing local `OutcomeAuditor` verification path unless explicitly opted into via `WARDEN_AUDITOR_UAGENT_ENABLED=true`.
+When `WARDEN_REMOTE_AUDITOR=true`, WARDEN still runs its local check. For a mutating
+action (CREATE, WRITE, DELETE, RENAME) it also sends an `AuditRequest` to one trusted
+Auditor agent and reports **VERIFIED only if both agree**:
 
----
+1. the local check passes, and
+2. a response arrives in time that is signed by `WARDEN_AUDITOR_ADDRESS`, is bound to this
+   request (`request_id`, `nonce`, `action_digest`, `workspace_id`), is inside the request
+   window, says VERIFIED, lists no unexpected changes, and describes the same target
+   post-state WARDEN observed locally.
 
-## Architecture & Responsibilities
+Anything else is **UNVERIFIED** (executed, but not independently confirmed: timeout,
+unreachable Auditor, malformed/unsigned/forged/replayed/mismatched attestation) or
+**FAILED** (the Auditor reports a mismatch or collateral change). A local failure is final;
+a remote VERIFIED cannot rescue it.
 
-```
-                                      +------------------------+
-                                      |      ActionRequest     |
-                                      +------------------------+
-                                                  |
-                                                  v
-                                      +------------------------+
-                                      |  Policy Engine (Core)  |
-                                      |      [WDN-001..004]    |
-                                      +------------------------+
-                                                  |
-                                                  v
-                                      +------------------------+
-                                      | RestrictedExecutor (Core)
-                                      +------------------------+
-                                                  |
-                                                  v (exec_result)
-+-----------------------------------------------------------------------------------------+
-| WARDEN Coordinator (WardenAgent)                                                        |
-|   |                                                                                     |
-|   | 1. Capture Pre-State Manifest                                                       |
-|   | 2. Compute ActionDigest(action, workspace_root)                                     |
-|   | 3. Dispatch AuditRequest                                                            |
-|   v                                                                                     |
-| +-------------------------------------------------------------------------------------+ |
-| | AuditorUAgentVerifier (Fail-Closed Adapter)                                          | |
-| +-------------------------------------------------------------------------------------+ |
-+-----------------------------------------------------------------------------------------+
-                                 |                          ^
-                     AuditRequest|                          | AuditAttestation
-                     (Digest,    |                          | (Verdict,
-                      Manifest)  v                          |  Evidence)
-+-----------------------------------------------------------------------------------------+
-| Auditor uAgent (Isolated Process / Protocol Service)                                    |
-|   - Recomputes & Verifies ActionDigest (Rejects mismatches as UNVERIFIED)               |
-|   - Inspects Physical Disk via ReadOnlyWorkspaceView                                    |
-|   - Scans for Collateral Mutations (Unexpected deletions/modifications)                |
-|   - Evaluates Post-State independently of Executor claims                               |
-|   - Emits Signed / Structured AuditAttestation                                          |
-+-----------------------------------------------------------------------------------------+
-```
+Contracts: schemas and `check_attestation` in `warden/audit/attestation.py`, digests in
+`warden/security/digest.py`, request building in `warden/audit/request_builder.py`,
+verification in `warden/audit/remote.py`, transport in `warden/audit/transport.py`.
+See `docs/MULTI_AGENT_INTERFACE.md`.
 
-### Core Invariants & Boundaries
+## Running it
 
-1. **No Authorization Authority:** The Auditor does not evaluate policies (`WDN-001` through `WDN-004`), grant approvals, or authorize actions.
-2. **Zero Trust in Executor:** The Auditor completely ignores `executor_claimed_success` when establishing physical state. A claimed success with missing or incorrect disk state produces `verdict = FAILED`.
-3. **Fail-Closed Semantics:** Any timeout, network failure, malformed attestation, or `UNVERIFIED` verdict immediately causes the coordinator verifier to fail closed (`ExecutionStatus.FAILED, verified=False`).
-4. **Action Digest Binding:** The action parameters (`action_id`, `operation`, normalized `target`, `destination`, `content_sha256`, `workspace_root`) are bound into an unforgeable SHA-256 digest. If the request is tampered with, the Auditor returns `UNVERIFIED`.
-5. **Collateral Damage Detection:** The Auditor compares the pre-execution workspace file manifest against post-execution disk state. If an extra file outside the permitted target was deleted or altered, it produces `verdict = FAILED` with specific collateral evidence.
-6. **API Read-Only vs. OS Isolation:** The `ReadOnlyWorkspaceView` enforces API-level read-only access (no mutation methods). It does **not** provide OS kernel privilege isolation; OS-level isolation requires separate user accounts, containers, or jail boundaries.
+WARDEN side (`.env`): `WARDEN_REMOTE_AUDITOR=true`, `WARDEN_AUDITOR_ADDRESS=<auditor agent address>`,
+optionally `WARDEN_AUDITOR_TIMEOUT_SECONDS`. Enabling without an address fails at startup, and
+the Auditor address may not be WARDEN's own.
 
----
+Auditor side: `python -m warden.auditor` with its **own** `WARDEN_AUDITOR_SEED` (must differ
+from `AGENT_SEED`; the process refuses to start otherwise), `WARDEN_AUDITOR_ALLOWED_REQUESTER`
+(WARDEN's agent address; required) and optionally `WARDEN_AUDITOR_WORKSPACE_ROOT` /
+`WARDEN_AUDITOR_PORT`. It binds to loopback only. **This repository does not create the
+Auditor identity**: generate and record that seed yourself.
 
-## Configuration Reference
+## Auditor behavior
 
-| Environment Variable | Type | Default | Description |
-|---|---|---|---|
-| `WARDEN_AUDITOR_UAGENT_ENABLED` | bool | `false` | Enable the Auditor uAgent verification path |
-| `WARDEN_AUDITOR_PORT` | int | `8001` | Port for the standalone Auditor uAgent |
-| `WARDEN_AUDITOR_TIMEOUT_SECONDS` | float | `5.0` | Timeout before failing closed |
-| `WARDEN_AUDITOR_SEED` | string | `(random 256-bit)` | Secret seed for the Auditor agent identity |
+- Ignores (does not answer) senders outside the allow-list and malformed requests.
+- Recomputes the action digest from the request fields, checks the workspace id, expiry
+  and path containment, observes the real post-state itself, and diffs the touched
+  directories against WARDEN's pre-execution snapshots.
+- Caches by `(sender, request_id)`: redelivery returns the same attestation; reusing an id
+  with a different nonce is UNVERIFIED.
+- Has no policy, token, executor or signing-key access and no mutating filesystem calls
+  (enforced by a source-level test).
 
----
+## Limitations
 
-## Integration Guide for Claude (Core Security Owner)
-
-To preserve strict separation of ownership, **zero existing core security files were modified** on this feature branch:
-- [`src/warden/security/policy.py`](file:///D:/AI/WARDEN/src/warden/security/policy.py) (Untouched)
-- [`src/warden/security/authorization.py`](file:///D:/AI/WARDEN/src/warden/security/authorization.py) (Untouched)
-- [`src/warden/security/path_validation.py`](file:///D:/AI/WARDEN/src/warden/security/path_validation.py) (Untouched)
-- [`src/warden/execution/executor.py`](file:///D:/AI/WARDEN/src/warden/execution/executor.py) (Untouched)
-
-### Optional 2-Line Integration Hook in `WardenAgent`
-
-If Claude wishes to wire `AuditorUAgentVerifier` into `WardenAgent` by default:
-
-```python
-# In src/warden/agents/warden_agent.py
-from warden.auditor.verifier import AuditorUAgentVerifier
-
-# Inside WardenAgent.__init__:
-self.auditor = AuditorUAgentVerifier(self.workspace, path_validator=self.path_validator)
-```
-
-Because `AuditorUAgentVerifier.enabled` is `False` by default, this is a 100% transparent drop-in replacement that delegates to `OutcomeAuditor` unless `WARDEN_AUDITOR_UAGENT_ENABLED=true`.
+- A separate agent address is a separate identity, **not privilege isolation**. By default
+  both agents run as the same OS user on the same machine; a compromised host defeats both.
+- WARDEN's request is sent while the agent's event loop is blocked, for at most the timeout.
+- Collateral detection covers the touched files' directories only. Paths are case-folded,
+  which suits Windows and would need revisiting for case-sensitive filesystems.
+- The request carries the workspace-relative target, hashes and directory listings (names,
+  sizes, mtimes), not file content.
