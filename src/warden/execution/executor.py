@@ -14,6 +14,7 @@ from warden.models import (
 )
 from warden.execution.workspace import Workspace
 from warden.security.authorization import AuthorizationManager
+from warden.security.digest import capture_target_state, compute_state_digest
 from warden.security.path_validation import PathValidator, DEFAULT_PROTECTED_FILES
 
 
@@ -109,6 +110,7 @@ class RestrictedExecutor:
             target_canonical=target_path,
             destination_canonical=destination_path,
             workspace_root=self.workspace.root_path,
+            current_state_digest=compute_state_digest(capture_target_state(target_path, destination_path)),
         )
         if not is_authorized:
             return ExecutionResult(
