@@ -44,3 +44,6 @@ state/
 *.db
 *.db-wal
 *.db-shm
+
+# Northstar judge demo workspace (created by demo/northstar.py setup)
+northstar_workspace/
