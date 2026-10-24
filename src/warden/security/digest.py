@@ -48,6 +48,24 @@ def _digest(payload: Dict[str, Any]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+def compute_action_digest_from_hash(
+    operation: str,
+    target_canonical: Path | str,
+    destination_canonical: Optional[Path | str],
+    content_sha256: str,
+    workspace_root: Path | str,
+) -> str:
+    """Action digest from an already-computed content hash (for parties that never see the content)."""
+    return _digest({
+        "v": ACTION_DIGEST_VERSION,
+        "operation": operation.upper(),
+        "target": canonical_path_str(target_canonical),
+        "destination": canonical_path_str(destination_canonical),
+        "content_sha256": content_sha256,
+        "workspace": canonical_path_str(workspace_root),
+    })
+
+
 def compute_action_digest(
     operation: str,
     target_canonical: Path | str,
@@ -56,14 +74,14 @@ def compute_action_digest(
     workspace_root: Path | str,
 ) -> str:
     """Digest of the exact operation, canonical target/destination, content hash and workspace."""
-    return _digest({
-        "v": ACTION_DIGEST_VERSION,
-        "operation": operation.upper(),
-        "target": canonical_path_str(target_canonical),
-        "destination": canonical_path_str(destination_canonical),
-        "content_sha256": sha256_text(content),
-        "workspace": canonical_path_str(workspace_root),
-    })
+    return compute_action_digest_from_hash(
+        operation, target_canonical, destination_canonical, sha256_text(content), workspace_root
+    )
+
+
+def workspace_id(workspace_root: Path | str) -> str:
+    """Stable identifier of a workspace that does not reveal its filesystem location."""
+    return hashlib.sha256(canonical_path_str(workspace_root).encode("utf-8")).hexdigest()
 
 
 def describe_path_state(path: Optional[Path]) -> Dict[str, Any]:

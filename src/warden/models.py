@@ -34,6 +34,7 @@ class ExecutionStatus(str, Enum):
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
     EXECUTED = "EXECUTED"
     VERIFIED = "VERIFIED"
+    UNVERIFIED = "UNVERIFIED"  # executed, but the outcome could not be independently confirmed
     FAILED = "FAILED"
 
 
