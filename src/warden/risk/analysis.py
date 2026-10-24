@@ -15,7 +15,7 @@ from warden.risk.contract import MAX_EVIDENCE_CHARS, MAX_FINDINGS, RiskFinding, 
 
 SEVERITY_RANK = {"INFO": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 LEVEL_FOR_RANK = {0: "LOW", 1: "LOW", 2: "MEDIUM", 3: "HIGH", 4: "CRITICAL"}
-RECOMMENDATION = {"LOW": "PROCEED", "MEDIUM": "REVIEW", "HIGH": "REVIEW", "CRITICAL": "DO_NOT_PROCEED"}
+RECOMMENDATION = {"LOW": "ALLOW_CANDIDATE", "MEDIUM": "ESCALATE", "HIGH": "ESCALATE", "CRITICAL": "BLOCK_CANDIDATE"}
 
 DESTRUCTIVE = {"DELETE", "RENAME", "WRITE"}
 SENSITIVE_NAME = re.compile(
@@ -30,6 +30,13 @@ AUTHORITY_CLAIM = re.compile(
     re.IGNORECASE,
 )
 WILDCARD = re.compile(r"[*?\[\]]")
+TRAVERSAL = re.compile(r"(^|[\\/])\.\.([\\/]|$)|^[\\/]|^[a-zA-Z]:|^~|\x00|%2e%2e", re.IGNORECASE)
+INJECTION = re.compile(
+    r"(ignore (all |any )?(previous|prior|above) (instructions|rules)|system prompt|you are now|"
+    r"APPROVE [0-9a-f-]{36}|disregard (the )?(policy|rules)|<\s*/?\s*(system|assistant)\s*>|"
+    r"execute (this|the following) (command|shell))",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -108,6 +115,33 @@ def analyze(req: RiskRequest) -> Analysis:
     elif bound and op == "WRITE" and exists:
         add("DESTRUCTIVE_IMPACT", "MEDIUM",
             f"Overwrites the existing {target} ({_size(target_state)}) with {req.content_length or 0} characters.")
+
+    # Workspace escape attempts and link substitution
+    raw = req.requested_target or target
+    if TRAVERSAL.search(raw) or (req.destination and TRAVERSAL.search(req.destination)):
+        add("PATH_TRAVERSAL", "CRITICAL" if not bound else "HIGH",
+            "The requested path uses parent-directory, absolute or encoded segments to reach outside the workspace.")
+    for label, state in (("target", target_state), ("destination", req.destination_state or {})):
+        if state.get("kind") == "symlink":
+            add("SYMLINK_TARGET", "HIGH", f"The {label} is a symbolic link; what it points to can change.")
+
+    # Overwrite and collateral effects
+    if bound and op == "WRITE" and exists:
+        add("OVERWRITE", "MEDIUM", f"Replaces the current content of {target}; the old content is not kept.")
+    if bound and op == "CREATE" and exists:
+        add("UNCERTAIN_STATE", "LOW", f"{target} already exists; the create would fail.")
+        uncertainty = max(uncertainty, 1)
+    if bound and op == "RENAME" and req.destination:
+        src_dir = target.replace("\\", "/").rpartition("/")[0]
+        dst_dir = req.destination.replace("\\", "/").rpartition("/")[0]
+        if src_dir != dst_dir:
+            add("COLLATERAL_EFFECT", "LOW", f"Moves {target} into a different directory ({dst_dir or 'workspace root'}).")
+
+    # Untrusted content that tries to steer agents
+    if req.content_preview and INJECTION.search(req.content_preview):
+        add("CONTENT_INJECTION", "HIGH",
+            "The content to be written contains instructions aimed at agents (for example approval commands); "
+            "it is treated as data only.")
 
     # Scope
     if WILDCARD.search(target):

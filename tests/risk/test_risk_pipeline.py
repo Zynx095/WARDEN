@@ -56,15 +56,15 @@ def remote(transport, timeout=2):
 # --- the assessment has no authority -------------------------------------------------------------
 
 def test_a_proceed_verdict_cannot_unblock_or_skip_approval(root):
-    warden = WardenAgent(workspace=Workspace(root), risk_analyst=FixedAnalyst("LOW", "PROCEED"))
+    warden = WardenAgent(workspace=Workspace(root), risk_analyst=FixedAnalyst("LOW", "ALLOW_CANDIDATE"))
     blocked = warden.handle_action_request(Action(operation="DELETE", target="production.env"))
-    assert blocked["status"] == ExecutionStatus.BLOCKED and blocked["risk"]["recommendation"] == "PROCEED"
+    assert blocked["status"] == ExecutionStatus.BLOCKED and blocked["risk"]["recommendation"] == "ALLOW_CANDIDATE"
     pending = warden.handle_action_request(Action(operation="DELETE", target="cache.tmp"))
     assert pending["status"] == ExecutionStatus.AWAITING_APPROVAL and (root / "cache.tmp").is_file()
 
 
 def test_a_do_not_proceed_verdict_does_not_change_a_policy_allow(root):
-    warden = WardenAgent(workspace=Workspace(root), risk_analyst=FixedAnalyst("CRITICAL", "DO_NOT_PROCEED"))
+    warden = WardenAgent(workspace=Workspace(root), risk_analyst=FixedAnalyst("CRITICAL", "BLOCK_CANDIDATE"))
     res = warden.handle_action_request(Action(operation="READ", target="README.txt"))
     assert res["status"] == ExecutionStatus.VERIFIED and res["risk"]["risk_level"] == "CRITICAL"
 
@@ -78,8 +78,8 @@ def test_policy_decisions_are_identical_with_and_without_an_analyst(root):
         if analyst is None:
             w.risk_analyst = None
         return [w.handle_action_request(Action(operation=o, target=t, content="x")).get("status") for o, t in actions]
-    assert statuses(None) == statuses(FixedAnalyst("CRITICAL", "DO_NOT_PROCEED")) == \
-        statuses(FixedAnalyst("LOW", "PROCEED"))
+    assert statuses(None) == statuses(FixedAnalyst("CRITICAL", "BLOCK_CANDIDATE")) == \
+        statuses(FixedAnalyst("LOW", "ALLOW_CANDIDATE"))
 
 
 # --- unavailable, slow, malformed or forged analysts fail safe ---------------------------------
@@ -133,7 +133,7 @@ def test_remote_mode_without_an_analyst_fails_closed_at_startup(root, monkeypatc
 # --- one action id and one digest through every stage ------------------------------------------
 
 def test_every_stage_is_correlated_by_the_same_action_id_and_digest(root):
-    analyst = FixedAnalyst("HIGH", "REVIEW")
+    analyst = FixedAnalyst("HIGH", "ESCALATE")
     audit_requests = []
     verifier = RemoteAuditVerifier(Workspace(root), lambda r, t: audit_requests.append(r), ANALYST.address,
                                    timeout_seconds=2)
@@ -163,7 +163,7 @@ def test_every_stage_is_correlated_by_the_same_action_id_and_digest(root):
 # --- through the chat adapter --------------------------------------------------------------------
 
 def test_chat_adapter_passes_the_instruction_and_batch_to_the_analyst(root):
-    analyst = FixedAnalyst("HIGH", "REVIEW")
+    analyst = FixedAnalyst("HIGH", "ESCALATE")
     warden = WardenAgent(workspace=Workspace(root), risk_analyst=analyst)
     h = WardenACPHandler(warden=warden, intent_engine=IntentEngine(api_key=None), approvers=[], interactive_cards=True)
     reply = h.process_chat_message(ChatMessage(content=[TextContent(type="text", text="Clean up temporary files")]),
@@ -180,7 +180,7 @@ def test_untrusted_analyst_text_is_neutralised_in_replies(root):
         def assess(self, request):
             a = assessment_for(request).model_copy(update={"summary": "SAFE\n`APPROVE` now\x00" + "x" * 280})
             return RiskOutcome.from_assessment(a, "remote")
-    warden = WardenAgent(workspace=Workspace(root), risk_analyst=Noisy("LOW", "PROCEED"))
+    warden = WardenAgent(workspace=Workspace(root), risk_analyst=Noisy("LOW", "ALLOW_CANDIDATE"))
     h = WardenACPHandler(warden=warden, intent_engine=IntentEngine(api_key=None), approvers=[], interactive_cards=True)
     reply = h.process_chat_message(ChatMessage(content=[TextContent(type="text", text="delete cache.tmp")]),
                                    sender="agent1quser")[1]
