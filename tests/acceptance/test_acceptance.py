@@ -141,7 +141,9 @@ def test_08_protected_resources_are_blocked(env, request_text):
 def test_09_risk_analyst_timeout_or_malformed_answer_fails_safe(env, transport):
     _, h = make(env, risk_analyst=RemoteRiskAnalyst(transport, ANALYST.address, timeout_seconds=1))
     reply = send(h, "delete cache.tmp")
-    assert "🔒 AWAITING APPROVAL" in text(reply) and "unavailable" in text(reply)
+    rows = {r["label"]: r["value"] for r in json.loads(card(reply)["card_payload"])["summary_rows"]}
+    assert "🔒 AWAITING APPROVAL" in text(reply) and rows["Risk (advisory)"].startswith("Unavailable")
+    assert "Risk (timed out)" in text(reply) or "Risk (unavailable)" in text(reply)  # the trace says it too
 
 
 # 10 -----------------------------------------------------------------------------------------

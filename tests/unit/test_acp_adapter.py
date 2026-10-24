@@ -82,7 +82,7 @@ def test_destructive_action_and_subsequent_approval_via_acp(
     ack2, reply2 = acp_handler.process_chat_message(approval_msg, sender="asi1_user")
 
     reply_text2 = reply2.content[0].text
-    assert "independently confirmed" in reply_text2
+    assert "independently verified" in reply_text2
     assert "VERIFIED" in reply_text2
     # File is now deleted and verified on disk
     assert not acp_workspace.exists("obsolete.tmp")
@@ -182,6 +182,6 @@ def test_approve_with_leading_mention(
         text=f"@agent1q0kewgd2uyceeqrfn9jdln75nhwvfk7pmycaacqvcqm8qtxptsea6szeql7 APPROVE {pending_id}",
     )])
     _, rep2 = acp_handler.process_chat_message(approve_msg, sender="bob")
-    assert "independently confirmed" in rep2.content[0].text
+    assert "independently verified" in rep2.content[0].text
     assert "VERIFIED" in rep2.content[0].text
     assert not acp_workspace.exists("junk.tmp")

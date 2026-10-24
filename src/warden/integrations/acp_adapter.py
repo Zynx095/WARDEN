@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 from uagents import Context, Protocol
 from uagents_core.contrib.protocols.chat import (
     ChatAcknowledgement,
@@ -34,14 +34,19 @@ from warden.integrations.cards import (
     validate_card_metadata,
 )
 from warden.models import Action, Decision, ExecutionStatus
-from warden.presentation.reports import format_decision_report, format_no_action, format_pipeline_report
+from warden.presentation.reports import (
+    format_decision_report,
+    format_no_action,
+    format_notice,
+    format_pipeline_report,
+)
 
 logger = logging.getLogger(__name__)
 
 MAX_MESSAGE_CHARS = 4000
-DUPLICATE_AFTER_RESTART = (
-    "[WARDEN] This message was already processed. Nothing was run again. "
-    "Send a new message to make a new request."
+DUPLICATE_AFTER_RESTART = format_notice(
+    "Already processed",
+    "This message was already processed. Nothing was run again. Send a new message to make a new request.",
 )
 
 # "APPROVE|REJECT <action_id> <action digest>": the operator echoes the digest shown in the prompt.
@@ -103,21 +108,33 @@ class WardenACPHandler:
             out = out.replace(variant, "<workspace>")
         return out
 
+    def _valid_cards(self, cards: Iterable[Optional[MetadataContent]]) -> List[MetadataContent]:
+        """Cards to send: only when enabled, scrubbed of local paths, and only if still protocol-valid."""
+        valid: List[MetadataContent] = []
+        if not self.interactive_cards:
+            return valid
+        for card in cards:
+            if card is None:
+                continue
+            metadata = {k: self._scrub(v) for k, v in card.metadata.items()}
+            try:
+                validate_card_metadata(metadata)
+            except CardValidationError as exc:  # never send a card that breaks the protocol
+                logger.error("Dropping invalid card: %s", exc)
+                continue
+            valid.append(MetadataContent(metadata=metadata))
+        return valid
+
     def _message(self, text: str, cards: Iterable[Optional[MetadataContent]] = ()) -> ChatMessage:
-        """Reply with the text report first (always readable) and, if enabled, protocol-valid cards."""
-        content: List[Any] = [TextContent(type="text", text=text)]
-        if self.interactive_cards:
-            for card in cards:
-                if card is None:
-                    continue
-                metadata = {k: self._scrub(v) for k, v in card.metadata.items()}
-                try:
-                    validate_card_metadata(metadata)
-                except CardValidationError as exc:  # never send a card that breaks the protocol
-                    logger.error("Dropping invalid card: %s", exc)
-                    continue
-                content.append(MetadataContent(metadata=metadata))
-        return ChatMessage(content=content)
+        """Reply with the text first (always readable) and, if enabled, protocol-valid cards."""
+        return ChatMessage(content=[TextContent(type="text", text=text), *self._valid_cards(cards)])
+
+    def _report(self, text_for: Callable[[bool], str], cards: Iterable[Optional[MetadataContent]]) -> ChatMessage:
+        """A report reply. With a valid card the text is compact (the card carries the details);
+        without one, because cards are off or a card was dropped, the text is complete."""
+        valid = self._valid_cards(cards)
+        text = self._scrub(text_for(bool(valid)))
+        return ChatMessage(content=[TextContent(type="text", text=text), *valid])
 
     def process_chat_message(
         self,
@@ -146,10 +163,8 @@ class WardenACPHandler:
         except Exception as exc:  # fail closed: report a generic error, log only the type
             logger.error("ACP message handling failed: %s", type(exc).__name__)
             ack = ChatAcknowledgement(timestamp=msg.timestamp, acknowledged_msg_id=msg.msg_id)
-            reply = ChatMessage(content=[TextContent(
-                type="text",
-                text="[WARDEN] The request could not be processed safely. No action was taken.",
-            )])
+            reply = ChatMessage(content=[TextContent(type="text", text=format_notice(
+                "Request not processed", "The request could not be processed safely. No action was taken."))])
 
         if msg_id_key:
             if len(self._processed_messages) >= 1000:
@@ -181,16 +196,18 @@ class WardenACPHandler:
         user_text = user_text.strip()
 
         if not user_text:
-            reply_text = (
-                "WARDEN: Received empty message. Please provide an instruction "
-                "(e.g., 'Clean up temporary files in workspace' or 'Read README.md')."
+            reply_text = format_notice(
+                "Message not processed",
+                "Received an empty message; nothing was run.",
+                "Describe a file action, for example `read README.txt` or `list the files in the workspace`.",
             )
             return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
 
         if len(user_text) > MAX_MESSAGE_CHARS:
-            reply_text = (
-                f"[WARDEN] Message rejected: {len(user_text)} characters exceeds the "
-                f"{MAX_MESSAGE_CHARS} character limit. No action was taken."
+            reply_text = format_notice(
+                "Message not processed",
+                f"The message has {len(user_text)} characters, which exceeds the {MAX_MESSAGE_CHARS} character "
+                "limit. No action was taken.",
             )
             return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
 
@@ -208,7 +225,7 @@ class WardenACPHandler:
                 card_decision = parse_card_decision(clean_user_text)
             except CardResponseError as exc:
                 logger.warning("Refused a card response from %s: %s", sender[:16], exc)
-                return ack, self._message(f"[WARDEN] {exc}")
+                return ack, self._message(format_notice("Decision not applied", str(exc)))
             if card_decision is not None:
                 return ack, self._decision_reply(
                     card_decision.decision, card_decision.action_id, card_decision.digest, sender
@@ -233,8 +250,9 @@ class WardenACPHandler:
             logger.warning("Dropped %d invalid proposal(s) for a request from %s", len(batch.rejected), sender[:16])
 
         if not proposed_actions:
-            # The user's text is echoed sanitized and bounded, never raw.
-            return ack, ChatMessage(content=[TextContent(type="text", text=self._scrub(format_no_action(user_text)))])
+            # The help names only what the active parser understands; the user's text is not echoed.
+            rename = bool(self.intent_engine.api_key) and not self.intent_engine.offline
+            return ack, ChatMessage(content=[TextContent(type="text", text=format_no_action(rename_supported=rename))])
 
         # 5. Evaluate and execute proposed actions through WARDEN's pipeline
         results: List[Dict[str, Any]] = []
@@ -254,8 +272,8 @@ class WardenACPHandler:
             results.append(res)
 
         # 6. Format structured conversational response
-        reply_text = self._scrub(self._format_pipeline_response(user_text, results))
-        return ack, self._message(reply_text, cards_for_results(results) if self.interactive_cards else ())
+        return ack, self._report(lambda compact: self._format_pipeline_response(user_text, results, compact),
+                                 cards_for_results(results) if self.interactive_cards else ())
 
     def _prune_approval_owners(self) -> None:
         """Forget owners of approvals that are no longer pending (expired, used or invalidated)."""
@@ -272,11 +290,11 @@ class WardenACPHandler:
         if owner is not None and owner != sender and sender not in self.approvers:
             logger.warning("Decision attempt by a sender that did not request action %s", action_id[:8])
             return {"action_id": action_id, "status": ExecutionStatus.FAILED, "executed": False, "verified": False,
-                    "refused": True,
+                    "refused": True, "decided": True,
                     "error": "only the requester or a configured approver may approve it. No action was taken."}
         if supplied_digest is None and self.warden.auth_manager.get_pending_approval(action_id) is not None:
             return {"action_id": action_id, "status": ExecutionStatus.FAILED, "executed": False, "verified": False,
-                    "refused": True,
+                    "refused": True, "decided": True,
                     "error": "the action digest is required so that you approve exactly what was shown. Reply "
                              f"`{decision} <action_id> <digest>` using the full command from the approval request. "
                              "No action was taken."}
@@ -286,16 +304,16 @@ class WardenACPHandler:
 
     def _decision_reply(self, decision: str, action_id: str, supplied_digest: Optional[str], sender: str) -> ChatMessage:
         result = self.decide(decision, action_id, supplied_digest, sender)
-        text = self._scrub(self._format_approval_response(action_id, result))
-        return self._message(text, [build_result_card(result)] if self.interactive_cards else ())
+        return self._report(lambda compact: self._format_approval_response(action_id, result, compact),
+                            [build_result_card(result)] if self.interactive_cards else ())
 
-    def _format_approval_response(self, action_id: str, res: Dict[str, Any]) -> str:
+    def _format_approval_response(self, action_id: str, res: Dict[str, Any], compact: bool = False) -> str:
         """Text for an approve/reject decision (presentation only; see warden.presentation.reports)."""
-        return format_decision_report(action_id, res)
+        return format_decision_report(action_id, res, compact=compact)
 
-    def _format_pipeline_response(self, prompt: str, results: List[Dict[str, Any]]) -> str:
+    def _format_pipeline_response(self, prompt: str, results: List[Dict[str, Any]], compact: bool = False) -> str:
         """Text for a new request: one block per proposed action, with its trace."""
-        return format_pipeline_report(prompt, results)
+        return format_pipeline_report(prompt, results, compact=compact)
 
 
 

@@ -60,7 +60,7 @@ def test_primary_cleanup_workflow_end_to_end(disposable_workspace: Workspace):
     assert ack.acknowledged_msg_id == inbound_acp_msg.msg_id
 
     reply_text = acp_reply.content[0].text
-    assert "Security Verification Report" in reply_text
+    assert "actions evaluated" in reply_text
     assert "🔒 AWAITING APPROVAL" in reply_text
 
     # Extract pending action IDs from the reply
@@ -75,7 +75,7 @@ def test_primary_cleanup_workflow_end_to_end(disposable_workspace: Workspace):
     approve_msg = ChatMessage(content=[TextContent(type="text", text=f"APPROVE {pending_ids[0]}")])
     _, approval_reply = acp_handler.process_chat_message(approve_msg, sender="security_officer")
 
-    assert "independently confirmed" in approval_reply.content[0].text
+    assert "independently verified" in approval_reply.content[0].text
     assert "VERIFIED" in approval_reply.content[0].text
 
     # Verify that the approved file was deleted and verified on disk

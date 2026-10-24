@@ -82,7 +82,7 @@ def test_controlled_security_demonstration_workflow(demo_workspace: Workspace):
     ack, reply = _send_chat(handler, "Delete cache.tmp", requester)
     assert "🔒 AWAITING APPROVAL" in reply
     assert "WDN-004" in reply
-    assert "Destructive operation requires approval" in reply
+    assert "Destructive action: explicit human approval required" in reply
     match = re.search(r"APPROVE\s+([a-f0-9\-]+\s+[a-f0-9]{64})", reply)
     assert match is not None
     pending_id = match.group(1)
@@ -98,7 +98,7 @@ def test_controlled_security_demonstration_workflow(demo_workspace: Workspace):
 
     # Step 4: Designated approver authorizes the pending deletion
     ack, reply = _send_chat(handler, f"APPROVE {pending_id}", designated_approver)
-    assert "Executed after approval, and the actual outcome was independently confirmed" in reply
+    assert "- **Approval:** approved by an authorized approver" in reply
     assert "✅ VERIFIED" in reply
     assert "Outcome independently verified: target 'cache.tmp' is confirmed deleted" in reply
 

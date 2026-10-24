@@ -129,7 +129,8 @@ def run_demo(
     step("5. Approve the held deletions (human-in-the-loop)")
     for pending_id in approvals:
         approval_reply = _say(handler, f"APPROVE {pending_id}")
-        out(" | ".join(approval_reply.splitlines()[1:4:2]))
+        lines = [line for line in approval_reply.splitlines() if line.strip()]
+        out(" | ".join(lines[:2] + [line for line in lines if line.startswith("- **Target:**")][:1]))
     report.check(not any((report.workspace / f).exists() for f in TEMP_FILES),
                  "approved temporary files are gone from disk")
 
