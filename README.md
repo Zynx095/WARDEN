@@ -10,7 +10,7 @@ digest-bound human approval, restricted execution and independent auditing befor
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-685%20passing-2ea44f)](tests/)
+[![Tests](https://img.shields.io/badge/tests-734%20passing-2ea44f)](tests/)
 [![uAgents](https://img.shields.io/badge/uAgents-0.26.1-FFD000)](https://fetch.ai)
 [![Protocol](https://img.shields.io/badge/Agent%20Chat%20Protocol-0.3.0-8a2be2)](https://fetch.ai)
 [![ASI:One Cards](https://img.shields.io/badge/ASI%3AOne%20Cards-v1-4E79A7)](docs/INTERACTIVE_CARDS.md)
@@ -417,7 +417,7 @@ WARDEN/
 .\.venv\Scripts\python.exe -m pytest tests/integration/test_sentinel_network_live.py   # real multi-process loopback
 ```
 
-**685 passing.** The suite is hermetic: it never touches the network or real credentials, and it clears API
+**734 passing.** The suite is hermetic: it never touches the network or real credentials, and it clears API
 keys, seeds and security-relevant `WARDEN_*` variables for every test.
 
 ---
