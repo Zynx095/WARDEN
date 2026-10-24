@@ -149,7 +149,8 @@ def validate_target(root: Path) -> None:
                          "script; nothing was changed. Choose an empty directory with --workspace.")
 
 
-def setup(root: Path) -> int:
+def build(root: Path) -> dict:
+    """(Re)create the validated workspace and its manifest; returns the manifest."""
     validate_target(root)
     if root.exists():
         for child in root.iterdir():  # only inside the validated demo workspace
@@ -169,6 +170,11 @@ def setup(root: Path) -> int:
         "files": inventory(root),
     }
     (root / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return manifest
+
+
+def setup(root: Path) -> int:
+    manifest = build(root)
     print(f"Northstar demo workspace ready: {root}")
     for rel, digest in manifest["files"].items():
         print(f"  {rel:32} {digest[:16]}…")
@@ -208,9 +214,9 @@ def check(root: Path) -> int:
     return 0 if ok else 1
 
 
-def audit(root: Path, show_all: bool) -> int:
+def audit(root: Path, show_all: bool, log: Optional[Path] = None) -> int:
     since = None if show_all else datetime.fromisoformat(load_manifest(root)["created_at"])
-    log = get_config().audit_log
+    log = log or get_config().audit_log
     if not log or not Path(log).is_file():
         print("[ERROR] No audit log found. Set WARDEN_AUDIT_LOG (default ./logs/audit.jsonl) and run the agent.")
         return 1
