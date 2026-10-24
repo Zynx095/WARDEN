@@ -1,5 +1,11 @@
 # WARDEN Sentinel Network
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB.svg?logo=python&logoColor=white)](pyproject.toml)
+[![uAgents](https://img.shields.io/badge/uAgents-0.26.1-FFD000.svg)](https://fetch.ai)
+[![Protocol](https://img.shields.io/badge/Protocol-AgentChatProtocol_v0.3.0-blueviolet.svg)](https://fetch.ai)
+[![ASI:One Cards](https://img.shields.io/badge/ASI:One_Cards-Protocol_v1-4E79A7.svg)](docs/INTERACTIVE_CARDS.md)
+
 A security-control layer for AI-agent file actions, reachable through ASI:One once it is deployed.
 Every request goes through one fixed chain:
 
