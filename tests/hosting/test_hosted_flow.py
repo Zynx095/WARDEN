@@ -53,6 +53,12 @@ def test_2_protected_file_is_blocked(root):
     assert (root / "production.env").is_file()
 
 
+def test_protected_file_contents_are_never_returned(root):
+    _, h = make(root)
+    reply = say(h, "read production.env")
+    assert "[BLOCKED]" in reply and "DEMO_ONLY_PLACEHOLDER" not in reply
+
+
 def test_3_risky_action_requires_approval(root):
     _, h = make(root)
     reply = say(h, "delete cache.tmp")

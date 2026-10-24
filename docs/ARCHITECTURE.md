@@ -67,7 +67,7 @@ An LLM or untrusted agent **cannot authorize its own actions**. An authorization
 - Evaluated by `PolicyEngine` and `PathValidator`:
   - **Supported operations check:** Unknown commands (e.g. `EXECUTE_SHELL`) are rejected with `WDN-001`.
   - **Path boundary containment:** Canonical path resolution enforces strict containment within `workspace_root`. Directory traversal (`..`), Windows drive letters (`C:`), UNC paths (`\\server\share`), device names (`CON`, `NUL`), Alternate Data Streams (`:`), and symlink breakouts are rejected with `WDN-002`.
-  - **Protected resources:** Sensitive configuration files (`.env`, `production.env`, `secrets.json`, `credentials.json`) cannot be written, created, deleted, or renamed (`WDN-003`).
+  - **Protected resources:** Sensitive configuration files (`.env`, `production.env`, `secrets.json`, `credentials.json`) cannot be read, written, created, deleted, or renamed (`WDN-003`); a read result goes back to a remote chat peer, so reading one would leak it.
   - **Destructive operations:** Deletions and renames trigger `REQUIRE_APPROVAL` (`WDN-004`).
 - If `ALLOW`: An unforgeable `AuthorizationToken` (HMAC-SHA256) is issued with an explicit expiration window.
 - If `REQUIRE_APPROVAL`: The action is placed into a pending approval state. Ordinary LLM statements cannot approve the action; approval must come through a trusted verification channel (`approve_and_execute`).
