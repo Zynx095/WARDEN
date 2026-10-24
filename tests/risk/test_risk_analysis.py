@@ -99,7 +99,7 @@ def test_request_carries_only_a_bounded_preview_of_proposed_content_and_analysis
     assert "sha256" in req.model_dump_json() and analyze(req) == analyze(req)
 
 
-@pytest.mark.parametrize("raw", ["../../etc/passwd", "..\outside.txt", "/etc/shadow", "C:/Windows/win.ini",
+@pytest.mark.parametrize("raw", ["../../etc/passwd", r"..\outside.txt", "/etc/shadow", "C:/Windows/win.ini",
                                  "%2e%2e/secret"])
 def test_traversal_attempts_are_flagged(raw):
     a = analyze(request(target=raw, digest="", state=None, text=f"delete {raw}"))
