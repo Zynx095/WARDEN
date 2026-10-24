@@ -32,6 +32,8 @@ class ExecutionStatus(str, Enum):
     AUTHORIZED = "AUTHORIZED"
     BLOCKED = "BLOCKED"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    REJECTED = "REJECTED"  # an authorized approver declined; nothing was executed
+    EXPIRED = "EXPIRED"    # the approval window closed before a decision; nothing was executed
     EXECUTED = "EXECUTED"
     VERIFIED = "VERIFIED"
     UNVERIFIED = "UNVERIFIED"  # executed, but the outcome could not be independently confirmed

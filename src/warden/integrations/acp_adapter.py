@@ -27,14 +27,20 @@ logger = logging.getLogger(__name__)
 
 MAX_MESSAGE_CHARS = 4000
 
-# "APPROVE <action_id> <action digest>": the operator echoes the digest shown in the prompt.
-APPROVE_PATTERN = re.compile(r"^\s*APPROVE\s+([a-f0-9\-]+)(?:\s+([a-f0-9]{16,64}))?", re.IGNORECASE)
+# "APPROVE|REJECT <action_id> <action digest>": the operator echoes the digest shown in the prompt.
+DECISION_PATTERN = re.compile(
+    r"^\s*(APPROVE|REJECT)\s+([a-f0-9\-]+)(?:\s+([a-f0-9]{16,64}))?", re.IGNORECASE
+)
 
 
 def _display(value: Any, limit: int = 200) -> str:
     """Render untrusted text safely inside a single-line markdown code span."""
     text = "".join(ch for ch in str(value) if ch.isprintable() and ch != "`")
     return text[:limit]
+
+
+def _status_label(status: Any) -> str:
+    return status.value if isinstance(status, ExecutionStatus) else str(status)
 
 
 class WardenACPHandler:
@@ -134,31 +140,13 @@ class WardenACPHandler:
             )
             return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
 
-        # 3. Check for human approval command in conversation: "APPROVE <action_id>"
+        # 3. Human decision typed in the conversation: "APPROVE|REJECT <action_id> <digest>"
         clean_user_text = re.sub(r"^\s*@\S+\s*", "", user_text)
-        approval_match = APPROVE_PATTERN.search(clean_user_text)
-        if approval_match:
-            action_id = approval_match.group(1).strip()
-            supplied_digest = approval_match.group(2)
-            owner = self._approval_owners.get(action_id)
-            if owner is not None and owner != sender and sender not in self.approvers:
-                logger.warning("Approval attempt by a sender that did not request action %s", action_id[:8])
-                reply_text = (
-                    f"[WARDEN] Approval refused for `{action_id[:8]}`: only the requester or a configured approver "
-                    "may approve it. No action was taken."
-                )
-                return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
-            if supplied_digest is None and self.warden.auth_manager.get_pending_approval(action_id) is not None:
-                reply_text = (
-                    f"[WARDEN] Approval refused for `{action_id[:8]}`: the action digest is required so that you "
-                    "approve exactly what was shown. Reply `APPROVE <action_id> <digest>` using the full command "
-                    "from the approval request. No action was taken."
-                )
-                return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
-            approval_result = self.warden.approve_and_execute(
-                action_id=action_id, approver_id=sender, expected_digest=supplied_digest
-            )
-            reply_text = self._scrub(self._format_approval_response(action_id, approval_result))
+        decision_match = DECISION_PATTERN.search(clean_user_text)
+        if decision_match:
+            decision = decision_match.group(1).upper()
+            action_id = decision_match.group(2).strip()
+            reply_text = self._decide(decision, action_id, decision_match.group(3), sender)
             return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
 
         # 4. Interpret intent into candidate Action proposals
@@ -189,7 +177,8 @@ class WardenACPHandler:
         results: List[Dict[str, Any]] = []
         self._prune_approval_owners()
         for action in proposed_actions:
-            res = self.warden.handle_action_request(action)
+            # Bind who may decide into the pending record itself, so every decision channel is held to it.
+            res = self.warden.handle_action_request(action, authorized_approvers={sender} | self.approvers)
             if res.get("status") == ExecutionStatus.AWAITING_APPROVAL:
                 self._approval_owners[res.get("pending_id", action.action_id)] = sender
             results.append(res)
@@ -203,8 +192,51 @@ class WardenACPHandler:
         for aid in [a for a in self._approval_owners if self.warden.auth_manager.get_pending_approval(a) is None]:
             del self._approval_owners[aid]
 
+    def decide(self, decision: str, action_id: str, supplied_digest: Optional[str], sender: str) -> Dict[str, Any]:
+        """Apply one human decision through the core pipeline and return its structured result.
+
+        This is the only decision path: typed commands and interactive-card selections both use it.
+        It never executes anything itself; approval goes through ``WardenAgent.approve_and_execute``.
+        """
+        owner = self._approval_owners.get(action_id)
+        if owner is not None and owner != sender and sender not in self.approvers:
+            logger.warning("Decision attempt by a sender that did not request action %s", action_id[:8])
+            return {"action_id": action_id, "status": ExecutionStatus.FAILED, "executed": False, "verified": False,
+                    "refused": True,
+                    "error": "only the requester or a configured approver may approve it. No action was taken."}
+        if supplied_digest is None and self.warden.auth_manager.get_pending_approval(action_id) is not None:
+            return {"action_id": action_id, "status": ExecutionStatus.FAILED, "executed": False, "verified": False,
+                    "refused": True,
+                    "error": "the action digest is required so that you approve exactly what was shown. Reply "
+                             f"`{decision} <action_id> <digest>` using the full command from the approval request. "
+                             "No action was taken."}
+        if decision == "REJECT":
+            return self.warden.reject_pending(action_id=action_id, approver_id=sender, expected_digest=supplied_digest)
+        return self.warden.approve_and_execute(action_id=action_id, approver_id=sender, expected_digest=supplied_digest)
+
+    def _decide(self, decision: str, action_id: str, supplied_digest: Optional[str], sender: str) -> str:
+        result = self.decide(decision, action_id, supplied_digest, sender)
+        return self._scrub(self._format_approval_response(action_id, result))
+
     def _format_approval_response(self, action_id: str, res: Dict[str, Any]) -> str:
         """Format the response after a human approval decision."""
+        if res.get("refused"):
+            return f"[WARDEN] Approval refused for `{action_id[:8]}`: {res.get('error')}"
+        if res.get("status") == ExecutionStatus.REJECTED:
+            return (
+                f"[WARDEN] Action REJECTED\n"
+                f"- Action ID: `{action_id}`\n"
+                f"- Status: `REJECTED`\n"
+                f"- Nothing was executed. The request is closed and cannot be approved later.\n"
+            )
+        if res.get("status") == ExecutionStatus.EXPIRED:
+            return (
+                f"[WARDEN] Approval EXPIRED\n"
+                f"- Action ID: `{action_id}`\n"
+                f"- Status: `EXPIRED`\n"
+                f"- This request expired before a decision arrived; nothing was executed. "
+                f"Ask again to get a fresh request.\n"
+            )
         if res.get("status") == ExecutionStatus.VERIFIED:
             return (
                 f"[WARDEN] Action Approval Execution Verified\n"
@@ -225,7 +257,7 @@ class WardenACPHandler:
             return (
                 f"[WARDEN] Action Approval Execution Failed\n"
                 f"- Action ID: `{action_id}`\n"
-                f"- Status: `{res.get('status')}`\n"
+                f"- Status: `{_status_label(res.get('status'))}`\n"
                 f"- Error: {res.get('error')}\n"
             )
 
