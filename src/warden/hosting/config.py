@@ -58,6 +58,8 @@ class HostedConfig(BaseModel):
         default_factory=lambda: env_bool("WARDEN_HOSTED_ALLOW_INSECURE_ENDPOINT", False)
     )
     public_endpoint: str = ""
+    # ASI:One Interactive Cards are on by default when hosted; every reply still leads with plain text.
+    interactive_cards: bool = Field(default_factory=lambda: env_bool("WARDEN_INTERACTIVE_CARDS", True))
     description: str = Field(default_factory=lambda: (os.getenv("AGENTVERSE_DESCRIPTION") or
         "Action-security agent: deterministic policy, exact-action approval and independent "
         "verification for file actions in a synthetic demo workspace.").strip())

@@ -16,11 +16,21 @@ from uagents import Context, Protocol
 from uagents_core.contrib.protocols.chat import (
     ChatAcknowledgement,
     ChatMessage,
+    MetadataContent,
     TextContent,
     chat_protocol_spec,
 )
 from warden.agents.intent_engine import IntentEngine
 from warden.agents.warden_agent import WardenAgent
+from warden.config import env_bool
+from warden.integrations.cards import (
+    CardResponseError,
+    CardValidationError,
+    build_result_card,
+    cards_for_results,
+    parse_card_decision,
+    validate_card_metadata,
+)
 from warden.models import Action, Decision, ExecutionStatus
 
 logger = logging.getLogger(__name__)
@@ -51,9 +61,14 @@ class WardenACPHandler:
         warden: WardenAgent,
         intent_engine: Optional[IntentEngine] = None,
         approvers: Optional[Iterable[str]] = None,
+        interactive_cards: Optional[bool] = None,
     ) -> None:
         self.warden = warden
         self.intent_engine = intent_engine or IntentEngine()
+        # ASI:One Interactive Cards (presentation only). Off unless enabled; the hosted entry point enables it.
+        self.interactive_cards = (
+            interactive_cards if interactive_cards is not None else env_bool("WARDEN_INTERACTIVE_CARDS", False)
+        )
         # Senders allowed to approve actions requested by others (WARDEN_APPROVER_ADDRESSES).
         # By default only the sender that requested an action may approve it.
         if approvers is None:
@@ -73,6 +88,22 @@ class WardenACPHandler:
         for variant in {str(root), root.as_posix(), str(root).replace("\\", "\\\\")}:
             out = out.replace(variant, "<workspace>")
         return out
+
+    def _message(self, text: str, cards: Iterable[Optional[MetadataContent]] = ()) -> ChatMessage:
+        """Reply with the text report first (always readable) and, if enabled, protocol-valid cards."""
+        content: List[Any] = [TextContent(type="text", text=text)]
+        if self.interactive_cards:
+            for card in cards:
+                if card is None:
+                    continue
+                metadata = {k: self._scrub(v) for k, v in card.metadata.items()}
+                try:
+                    validate_card_metadata(metadata)
+                except CardValidationError as exc:  # never send a card that breaks the protocol
+                    logger.error("Dropping invalid card: %s", exc)
+                    continue
+                content.append(MetadataContent(metadata=metadata))
+        return ChatMessage(content=content)
 
     def process_chat_message(
         self,
@@ -146,8 +177,19 @@ class WardenACPHandler:
         if decision_match:
             decision = decision_match.group(1).upper()
             action_id = decision_match.group(2).strip()
-            reply_text = self._decide(decision, action_id, decision_match.group(3), sender)
-            return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
+            return ack, self._decision_reply(decision, action_id, decision_match.group(3), sender)
+
+        # 3b. Interactive-card button press: same authority as the typed command, same decision path.
+        if self.interactive_cards:
+            try:
+                card_decision = parse_card_decision(clean_user_text)
+            except CardResponseError as exc:
+                logger.warning("Refused a card response from %s: %s", sender[:16], exc)
+                return ack, self._message(f"[WARDEN] {exc}")
+            if card_decision is not None:
+                return ack, self._decision_reply(
+                    card_decision.decision, card_decision.action_id, card_decision.digest, sender
+                )
 
         # 4. Interpret intent into candidate Action proposals
         # Gather context of files in current workspace sandbox
@@ -185,7 +227,7 @@ class WardenACPHandler:
 
         # 6. Format structured conversational response
         reply_text = self._scrub(self._format_pipeline_response(user_text, results))
-        return ack, ChatMessage(content=[TextContent(type="text", text=reply_text)])
+        return ack, self._message(reply_text, cards_for_results(results) if self.interactive_cards else ())
 
     def _prune_approval_owners(self) -> None:
         """Forget owners of approvals that are no longer pending (expired, used or invalidated)."""
@@ -214,9 +256,10 @@ class WardenACPHandler:
             return self.warden.reject_pending(action_id=action_id, approver_id=sender, expected_digest=supplied_digest)
         return self.warden.approve_and_execute(action_id=action_id, approver_id=sender, expected_digest=supplied_digest)
 
-    def _decide(self, decision: str, action_id: str, supplied_digest: Optional[str], sender: str) -> str:
+    def _decision_reply(self, decision: str, action_id: str, supplied_digest: Optional[str], sender: str) -> ChatMessage:
         result = self.decide(decision, action_id, supplied_digest, sender)
-        return self._scrub(self._format_approval_response(action_id, result))
+        text = self._scrub(self._format_approval_response(action_id, result))
+        return self._message(text, [build_result_card(result)] if self.interactive_cards else ())
 
     def _format_approval_response(self, action_id: str, res: Dict[str, Any]) -> str:
         """Format the response after a human approval decision."""
@@ -332,10 +375,11 @@ class WardenACPHandler:
 def create_acp_protocol(
     warden: WardenAgent,
     intent_engine: Optional[IntentEngine] = None,
+    interactive_cards: Optional[bool] = None,
 ) -> Protocol:
     """Create a uAgents Protocol implementing the official Agent Chat Protocol."""
     proto = Protocol(spec=chat_protocol_spec)
-    handler = WardenACPHandler(warden=warden, intent_engine=intent_engine)
+    handler = WardenACPHandler(warden=warden, intent_engine=intent_engine, interactive_cards=interactive_cards)
 
     @proto.on_message(model=ChatMessage)
     async def handle_message(ctx: Context, sender: str, msg: ChatMessage):

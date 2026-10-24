@@ -65,7 +65,8 @@ def test_4_invalid_or_expired_approval_cannot_execute(root):
     action_id, digest = command(say(h, "delete cache.tmp"))
     wrong = ("0" if digest[0] != "0" else "1") + digest[1:]
     assert "does not match" in say(h, f"APPROVE {action_id} {wrong}")
-    assert "refused" in say(h, f"APPROVE {action_id} {digest}", sender="agent1qsomeoneelse")
+    assert "VERIFIED" not in say(h, f"APPROVE {action_id} {digest}", sender="agent1qsomeoneelse")
+    assert (root / "cache.tmp").is_file()
     warden.auth_manager.get_pending_approval(action_id).expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     assert "EXPIRED" in say(h, f"APPROVE {action_id} {digest}")
     assert (root / "cache.tmp").is_file()

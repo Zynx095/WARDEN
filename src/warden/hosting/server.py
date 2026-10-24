@@ -59,6 +59,7 @@ def build_hosted_agent(
         readme_path=cfg.readme_path,
         resolver=resolver,
         loop=loop,
+        interactive_cards=cfg.interactive_cards,
     )
     scheme = cfg.public_endpoint.split(":", 1)[0]
     remote_auditor = get_config().remote_auditor
