@@ -38,3 +38,9 @@ temp_demo_workspace/
 hosted_workspace/
 # uagents_core opens this log in the working directory when its registration helpers load
 uagents_core.log
+# Durable approval state (WARDEN_STATE_DB)
+hosted_state/
+state/
+*.db
+*.db-wal
+*.db-shm
