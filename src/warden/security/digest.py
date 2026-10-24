@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,7 +24,8 @@ def canonical_path_str(p: Optional[Path | str]) -> str:
     """Canonical, case-folded absolute path string ('' for None)."""
     if p is None:
         return ""
-    return str(Path(p).resolve()).lower()
+    resolved = str(Path(p).resolve())
+    return resolved.lower() if sys.platform == "win32" else resolved
 
 
 def sha256_text(content: Optional[str]) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from warden.execution.workspace import Workspace
@@ -37,7 +38,8 @@ def _snapshot_directory(directory: Path) -> Optional[Dict[str, List[Any]]]:
         with os.scandir(directory) as entries:
             for entry in entries:
                 st = entry.stat(follow_symlinks=False)
-                snap[entry.name.lower()] = [entry.is_dir(follow_symlinks=False), st.st_size, st.st_mtime_ns]
+                entry_key = entry.name.lower() if sys.platform == "win32" else entry.name
+                snap[entry_key] = [entry.is_dir(follow_symlinks=False), st.st_size, st.st_mtime_ns]
     except FileNotFoundError:
         return {}
     except OSError:
@@ -131,7 +133,10 @@ class OutcomeAuditor:
         """Names that changed in the touched directories other than the authorized paths; None if unknowable."""
         pre_snaps = pre.get("snapshots") or {}
         post_snaps = self._snapshots(touched)
-        allowed: Set[Tuple[str, str]] = {(canonical_path_str(p.parent), p.name.lower()) for p in touched}
+        allowed: Set[Tuple[str, str]] = {
+            (canonical_path_str(p.parent), p.name.lower() if sys.platform == "win32" else p.name)
+            for p in touched
+        }
         changes: List[str] = []
         for directory, pre_snap in pre_snaps.items():
             post_snap = post_snaps.get(directory)
