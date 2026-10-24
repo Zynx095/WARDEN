@@ -51,3 +51,27 @@ never trusted.
 - Whether a terminal card should keep `requires_card_interaction="true"`: the doc lists it as
   required and does not say otherwise for `is_terminal` cards, so it is always sent.
 - The sender address ASI:One uses for clicks (see docs/HOSTING.md, residual risks).
+
+## Implementation selection (2026-10-24)
+
+Two implementations existed. This one (`warden.integrations.cards`, branch
+`feature/asi-hosting`) is canonical. The alternative (`warden.cards`, branch
+`feature/interactive-cards` at `eae8eff`, worktree `D:\AI\WARDEN_cards`) is kept unmodified
+for comparison and was not merged, in whole or in part. Evidence, from running both:
+
+| Check | `feature/asi-hosting` | `feature/interactive-cards` |
+|---|---|---|
+| Review payload matches the documented `review` schema (`approve_cta`/`reject_cta` with `selection`) | yes | no: `sections` + `actions[].payload`, so ASI:One would reject the card and show only text |
+| Result card | `custom`, `is_terminal="true"`, `requires_card_interaction="true"` | `detail` with `requires_card_interaction="false"` (documented value is `"true"`) and non-schema `sections` |
+| Decision path | one: `WardenACPHandler.decide` → `WardenAgent.reject_pending` / `approve_and_execute` | separate validator; REJECT deletes from `_pending_approvals` directly |
+| Approver policy | bound into the pending record at request time; survives loss of adapter state | in-memory owner map only; a fresh handler let another sender approve and execute |
+| Digest on REJECT | required and checked | not required |
+| Reject outcome | `REJECTED`, final, remembered | recorded as `BLOCKED`; later decisions get "not found" |
+| Decisions read from `MetadataContent` | no (documented route is chat text only) | yes (`card_action_payload`, `action`/`action_id` keys) |
+| File contents in cards | never | read output (up to 500 chars) in the result card |
+| Expiry | explicit `EXPIRED` | reported as generic "not found" |
+| Tests | 461 (suite incl. loopback card round trip) | 356 |
+
+Nothing from the alternative was retained: its protections (digest match, replay, state
+check) already exist in the core path used here, and its models describe a non-documented
+schema. Regression tests in `tests/integration/test_interactive_cards.py` cover the gaps above.
