@@ -41,11 +41,51 @@ ASI:One ──ACP──▶ Agentverse ──HTTPS POST /submit──▶ containe
   them off). Every reply leads with the plain-text report, so ASI:One's documented fallback to
   text keeps the flow usable if a card is rejected. See docs/INTERACTIVE_CARDS.md.
 
+## Endpoint exposure and request handling (reviewed against uAgents 0.26.1 / uagents-core 0.4.12)
+
+| Route | Served | Notes |
+|---|---|---|
+| `POST /submit` | yes | uAgents envelopes only (`application/json`, envelope schema). Agent senders must carry a valid signature; unsigned `user…` senders are refused by the signed chat handler. Only the Agent Chat Protocol is included. |
+| `HEAD /submit` | yes | SDK readiness probe used by Agentverse. |
+| `GET /health` | yes | Status, agent address, workspace readiness, remote-audit flag, endpoint scheme. No paths, secrets or contents. |
+| `/agent_info`, `/messages`, `/connect`, `/disconnect` | **no** | The SDK inspector is disabled in hosted mode. The SDK guards `/connect` and `/disconnect` only by client IP while trusting every `X-Forwarded-For` header, so a spoofed `127.0.0.1` reached `/connect`, which signs with the agent identity (reproduced in `tests/hosting/test_hosted_live.py` before the fix). |
+
+- Request bodies above `WARDEN_MAX_REQUEST_BYTES` (default 256 KiB) are not buffered and get
+  HTTP 400. Chat text above 4000 characters is refused without action.
+- Payload validation: only `TextContent` is interpreted. Decisions are accepted only as
+  `APPROVE|REJECT <id> <digest>` or a `warden.decision.v1` card selection, and always go
+  through `WardenACPHandler.decide`. Action requests become `Action`s via the intent parser
+  and then pass policy, approval, the restricted executor and verification unchanged.
+- Duplicate deliveries (same sender and `msg_id`) return the cached reply; nothing re-runs.
+- Every handler error is caught and answered with a generic "no action was taken" reply; only
+  the exception type is logged. Message text, seeds and keys are not logged.
+- Timeouts: approvals expire after `WARDEN_APPROVAL_TTL_SECONDS` (default 300 s); the remote
+  Auditor (off) has `WARDEN_AUDITOR_TIMEOUT_SECONDS`. HTTP connection timeouts are uvicorn's
+  defaults (keep-alive 5 s); slow-client protection is left to the platform's proxy.
+- Secrets come only from the runtime environment (`AGENT_SEED`, optional `AGENTVERSE_API_KEY`).
+  `.dockerignore` excludes `.env`, `*.env`, logs and workspaces; the image contains no secret.
+
+## Container build status
+
+Docker is **not available on the development machine** (`docker` is not installed, and WSL2
+cannot start because hardware virtualization is disabled), so the image has not been built
+or run. On a machine with Docker, from the repository root:
+
+```
+docker build -t warden-hosted:local .
+docker run --rm -p 8000:8000   -e AGENT_SEED="<throwaway test seed>"   -e WARDEN_PUBLIC_ENDPOINT=http://127.0.0.1:8000/submit   -e WARDEN_HOSTED_ALLOW_INSECURE_ENDPOINT=true   warden-hosted:local
+curl -s http://127.0.0.1:8000/health          # expect "status":"ok"
+curl -s -o /dev/null -w "%{http_code}
+" http://127.0.0.1:8000/agent_info   # expect 404
+```
+
+Use a throwaway seed for this local check; the insecure-endpoint flag is for loopback only.
+
 ## Remaining manual steps (need your accounts and permission)
 
 1. **Choose a container host** with a stable public HTTPS URL and no cold-start sleep long
    enough to fail Agentverse's reachability checks. Build `Dockerfile` (not yet built or run
-   here: no container runtime was available).
+   here: see "Container build status").
 2. **Set runtime secrets in the host's secret store**, never in the image: `AGENT_SEED` (the
    existing WARDEN identity, or a new one if you decide the public demo should have its own),
    `WARDEN_PUBLIC_ENDPOINT=https://<host>/submit`. Optionally `WARDEN_APPROVER_ADDRESSES`.

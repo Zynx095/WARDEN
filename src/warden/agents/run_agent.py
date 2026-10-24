@@ -44,6 +44,7 @@ __all__ = [
     "derive_agent_address",
     "describe_mode",
     "enable_inspector_pna_cors",
+    "limit_request_body",
     "restrict_bind_host",
     "main",
 ]
@@ -72,6 +73,35 @@ def restrict_bind_host(host: str = LOOPBACK_HOST) -> bool:
     if not hasattr(asgi, "HOST"):
         return False
     asgi.HOST = host
+    return True
+
+
+def limit_request_body(max_bytes: int) -> bool:
+    """Cap the request body the SDK's embedded HTTP server will buffer.
+
+    uAgents 0.26.1 reads every request body into memory without a limit. With this cap an
+    oversized body is read no further and handed to the SDK as empty, which it answers with
+    HTTP 400. Returns False if the SDK layout differs and the cap could not be applied.
+    """
+    try:
+        from uagents import asgi
+    except ImportError:  # pragma: no cover - uagents is a hard dependency
+        return False
+    if not hasattr(asgi, "_read_asgi_body"):
+        return False
+
+    async def _bounded_read(receive) -> bytes:
+        body = b""
+        more_body = True
+        while more_body:
+            message = await receive()
+            body += message.get("body", b"")
+            if len(body) > max_bytes:
+                return b""
+            more_body = message.get("more_body", False)
+        return body
+
+    asgi._read_asgi_body = _bounded_read
     return True
 
 
@@ -147,11 +177,14 @@ def build_warden_agent(
     resolver: Optional[Resolver] = None,
     loop: Optional[asyncio.AbstractEventLoop] = None,
     interactive_cards: Optional[bool] = None,
+    enable_agent_inspector: bool = True,
 ) -> Agent:
     """Build and configure a uAgents Agent running WARDEN with native ACP.
 
     ``resolver`` and ``loop`` default to the SDK's Almanac resolver and the process event
     loop; tests pass explicit ones to run several agents on loopback in one process.
+    ``enable_agent_inspector=False`` removes the SDK's /agent_info, /messages, /connect and
+    /disconnect routes; hosted mode needs none of them.
 
     Security invariants:
     - No hardcoded or placeholder seeds; an explicit seed or AGENT_SEED is mandatory.
@@ -194,6 +227,7 @@ def build_warden_agent(
         report_events=bool(use_mailbox or endpoint),
         description=agent_desc,
         readme_path=agent_readme,
+        enable_agent_inspector=enable_agent_inspector,
     )
     agent.include(
         create_acp_protocol(warden=warden_core, interactive_cards=interactive_cards),

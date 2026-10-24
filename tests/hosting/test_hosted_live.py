@@ -12,6 +12,7 @@ import re
 import socket
 import threading
 import time
+import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
@@ -98,6 +99,8 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
     client_url = f"http://127.0.0.1:{client_port}/submit"
 
     monkeypatch.setenv("WARDEN_HOSTED_ALLOW_INSECURE_ENDPOINT", "true")
+    from uagents import asgi
+    monkeypatch.setattr(asgi, "_read_asgi_body", asgi._read_asgi_body)  # restore the SDK reader afterwards
     cfg = HostedConfig(public_endpoint=warden_url, port=warden_port, workspace_root=tmp_path / "hosted")
     warden = build_hosted_agent(
         cfg, seed=WARDEN_SEED, resolver=RulesBasedResolver({client_id.address: client_url}),
@@ -174,5 +177,26 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
     assert result_card["is_terminal"] == "true" and '"label":"VERIFIED"' in result_card["card_payload"]
     assert "VERIFIED" in clicked and not (tmp_path / "hosted" / "debug.log").exists()
     assert str(tmp_path) not in json.dumps(review) + json.dumps(result_card)
+
+    # Endpoint exposure: only /submit and /health. The SDK's inspector routes (/connect could
+    # re-register this identity in someone else's Agentverse account) are not served, even to
+    # a caller that spoofs a loopback client through proxy headers.
+    def http(method, path, body=b"", headers=None):
+        req = urllib.request.Request(f"http://127.0.0.1:{warden_port}{path}", data=body or None, method=method,
+                                     headers={"content-type": "application/json", **(headers or {})})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status
+        except urllib.error.HTTPError as err:
+            return err.code
+
+    spoof = {"x-forwarded-for": "127.0.0.1"}
+    connect = json.dumps({"user_token": "x", "agent_type": "mailbox", "endpoint": "https://attacker.example/submit"})
+    assert http("POST", "/connect", connect.encode(), spoof) == 404
+    assert http("POST", "/disconnect", b"{}", spoof) == 404
+    assert http("GET", "/messages", headers=spoof) == 404
+    assert http("GET", "/agent_info") == 404
+    # Oversized bodies are refused before parsing.
+    assert http("POST", "/submit", b'{"pad":"' + b"x" * (cfg.max_request_bytes + 1) + b'"}') == 400
 
     assert offline == [], f"unexpected non-loopback HTTP attempts: {offline}"

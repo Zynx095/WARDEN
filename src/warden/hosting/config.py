@@ -58,6 +58,10 @@ class HostedConfig(BaseModel):
         default_factory=lambda: env_bool("WARDEN_HOSTED_ALLOW_INSECURE_ENDPOINT", False)
     )
     public_endpoint: str = ""
+    # Largest HTTP request body accepted. A chat envelope with a 4000-character message is a few KB.
+    max_request_bytes: int = Field(
+        default_factory=lambda: env_int("WARDEN_MAX_REQUEST_BYTES", 256 * 1024, 4096, 4 * 1024 * 1024)
+    )
     # ASI:One Interactive Cards are on by default when hosted; every reply still leads with plain text.
     interactive_cards: bool = Field(default_factory=lambda: env_bool("WARDEN_INTERACTIVE_CARDS", True))
     description: str = Field(default_factory=lambda: (os.getenv("AGENTVERSE_DESCRIPTION") or
