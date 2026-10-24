@@ -21,7 +21,7 @@ from warden.audit.attestation import AuditRequest, check_attestation
 from warden.audit.auditor import MUTATING_OPERATIONS, OutcomeAuditor
 from warden.audit.request_builder import AuditRequestError, build_audit_request
 from warden.execution.workspace import Workspace
-from warden.integrations.deadline import call_with_deadline
+from warden.deadline import call_with_deadline
 from warden.models import Action, ExecutionResult, ExecutionStatus, VerificationResult
 from warden.security.path_validation import PathValidator
 
