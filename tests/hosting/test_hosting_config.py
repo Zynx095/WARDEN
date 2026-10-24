@@ -49,6 +49,27 @@ def test_platform_port_is_honoured_and_validated(monkeypatch):
         HostedConfig()
 
 
+@pytest.mark.parametrize("env,message", [
+    ({"WARDEN_APPROVAL_MODE": ""}, "must be set explicitly"),
+    ({"WARDEN_APPROVAL_MODE": "independent"}, "needs WARDEN_APPROVER_ADDRESSES"),
+    ({"WARDEN_STATE_DB": ""}, "WARDEN_STATE_DB is required"),
+])
+def test_hosted_mode_refuses_unsafe_approval_or_state_settings(monkeypatch, env, message):
+    monkeypatch.setenv("WARDEN_PUBLIC_ENDPOINT", "https://w.example.com/submit")
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    with pytest.raises(ConfigError, match=message):
+        HostedConfig()
+
+
+def test_independent_mode_with_approvers_is_accepted(monkeypatch):
+    monkeypatch.setenv("WARDEN_PUBLIC_ENDPOINT", "https://w.example.com/submit")
+    monkeypatch.setenv("WARDEN_APPROVAL_MODE", "independent")
+    monkeypatch.setenv("WARDEN_APPROVER_ADDRESSES", "agent1qapprover")
+    cfg = HostedConfig()
+    assert cfg.approval_mode == "independent" and cfg.approvers == ["agent1qapprover"]
+
+
 def test_request_body_cap_has_a_safe_default_and_bounds(monkeypatch):
     monkeypatch.setenv("WARDEN_PUBLIC_ENDPOINT", "https://w.example.com/submit")
     assert HostedConfig().max_request_bytes == 256 * 1024

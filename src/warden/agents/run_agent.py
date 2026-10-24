@@ -29,7 +29,7 @@ from uagents.resolver import Resolver
 from warden.audit.factory import build_remote_auditor_if_enabled
 from warden.risk.factory import build_risk_analyst
 from warden.agents.warden_agent import WardenAgent
-from warden.config import ConfigError, env_bool, get_config, load_environment, resolve_repo_path
+from warden.config import ConfigError, WardenConfig, env_bool, get_config, load_environment, resolve_repo_path
 from warden.execution.workspace import Workspace
 from warden.identity import AgentIdentityError, derive_agent_address, validate_seed
 from warden.integrations.acp_adapter import create_acp_protocol
@@ -179,6 +179,7 @@ def build_warden_agent(
     loop: Optional[asyncio.AbstractEventLoop] = None,
     interactive_cards: Optional[bool] = None,
     enable_agent_inspector: bool = True,
+    config: Optional[WardenConfig] = None,
 ) -> Agent:
     """Build and configure a uAgents Agent running WARDEN with native ACP.
 
@@ -210,11 +211,13 @@ def build_warden_agent(
 
     ws_path = resolve_repo_path(workspace_dir or os.getenv("WARDEN_WORKSPACE_ROOT") or "./temp_workspace")
     workspace = Workspace(ws_path)
+    cfg = config or get_config()
     warden_core = WardenAgent(
         workspace=workspace,
-        audit_log_file=get_config().audit_log,
-        auditor=build_remote_auditor_if_enabled(workspace, agent_seed),
-        risk_analyst=build_risk_analyst(agent_seed),
+        config=cfg,
+        audit_log_file=cfg.audit_log,
+        auditor=build_remote_auditor_if_enabled(workspace, agent_seed, cfg),
+        risk_analyst=build_risk_analyst(agent_seed, cfg),
     )
 
     agent = Agent(
@@ -232,7 +235,8 @@ def build_warden_agent(
         enable_agent_inspector=enable_agent_inspector,
     )
     agent.include(
-        create_acp_protocol(warden=warden_core, interactive_cards=interactive_cards),
+        create_acp_protocol(warden=warden_core, interactive_cards=interactive_cards,
+                            approval_mode=cfg.approval_mode),
         publish_manifest=publish_manifest,
     )
 

@@ -22,6 +22,7 @@ from warden.config import ConfigError, get_config, load_environment
 from warden.hosting.config import HostedConfig
 from warden.hosting.demo_workspace import DemoWorkspaceError, is_demo_workspace, prepare_demo_workspace
 from warden.identity import AgentIdentityError, validate_seed
+from warden.security.state_store import StateStoreError
 
 logger = logging.getLogger("warden.hosting")
 
@@ -36,6 +37,9 @@ class HealthResponse(Model):
     workspace_ready: bool
     remote_auditor: bool
     endpoint_scheme: str
+    approval_mode: str
+    durable_state: bool
+    risk_analyst: str
 
 
 def build_hosted_agent(
@@ -47,7 +51,9 @@ def build_hosted_agent(
     """Prepare the synthetic workspace and build the endpoint-mode agent with a health route."""
     agent_seed = validate_seed(seed or os.getenv("AGENT_SEED"))
     workspace_root = prepare_demo_workspace(cfg.workspace_root)
+    core = get_config().model_copy(update={"approval_mode": cfg.approval_mode, "state_db": cfg.state_db})
     agent = build_warden_agent(
+        config=core,
         name=cfg.agent_name,
         seed=agent_seed,
         port=cfg.port,
@@ -67,7 +73,7 @@ def build_hosted_agent(
     if not limit_request_body(cfg.max_request_bytes):
         raise ConfigError("Cannot cap request body size on this uAgents version; refusing to start.")
     scheme = cfg.public_endpoint.split(":", 1)[0]
-    remote_auditor = get_config().remote_auditor
+    remote_auditor = core.remote_auditor
 
     @agent.on_rest_get(HEALTH_ROUTE, HealthResponse)
     async def health(ctx: Context) -> HealthResponse:
@@ -79,6 +85,9 @@ def build_hosted_agent(
             workspace_ready=ready,
             remote_auditor=remote_auditor,
             endpoint_scheme=scheme,
+            approval_mode=core.approval_mode,
+            durable_state=core.state_db is not None,
+            risk_analyst=core.risk_analyst,
         )
 
     return agent
@@ -93,7 +102,7 @@ def main() -> int:
     try:
         cfg = HostedConfig()
         agent = build_hosted_agent(cfg)
-    except (AgentIdentityError, ConfigError, DemoWorkspaceError, ValueError) as exc:
+    except (AgentIdentityError, ConfigError, DemoWorkspaceError, StateStoreError, ValueError) as exc:
         print(f"[CONFIGURATION ERROR] {exc}", file=sys.stderr)
         return 1
 

@@ -9,7 +9,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from warden.config import ConfigError, env_bool, env_int, resolve_repo_path
+from warden.config import APPROVAL_MODES, ConfigError, env_bool, env_int, resolve_repo_path
 
 DEFAULT_HOSTED_WORKSPACE = "./hosted_workspace"
 DEFAULT_AGENT_NAME = "warden-verification-agent"
@@ -58,6 +58,14 @@ class HostedConfig(BaseModel):
         default_factory=lambda: env_bool("WARDEN_HOSTED_ALLOW_INSECURE_ENDPOINT", False)
     )
     public_endpoint: str = ""
+    # Must be chosen explicitly when hosted: "independent" (recommended, with
+    # WARDEN_APPROVER_ADDRESSES) or "self" (a requester approves their own actions; demo only).
+    approval_mode: Optional[str] = Field(default_factory=lambda: (os.getenv("WARDEN_APPROVAL_MODE") or "").strip().lower() or None)
+    approvers: list = Field(default_factory=lambda: [a.strip() for a in (os.getenv("WARDEN_APPROVER_ADDRESSES") or "").split(",") if a.strip()])
+    # Durable approval state is mandatory when hosted: a restart must never forget a consumed approval.
+    state_db: Optional[Path] = Field(
+        default_factory=lambda: resolve_repo_path(os.getenv("WARDEN_STATE_DB")) if (os.getenv("WARDEN_STATE_DB") or "").strip() else None
+    )
     # Largest HTTP request body accepted. A chat envelope with a 4000-character message is a few KB.
     max_request_bytes: int = Field(
         default_factory=lambda: env_int("WARDEN_MAX_REQUEST_BYTES", 256 * 1024, 4096, 4 * 1024 * 1024)
@@ -77,3 +85,13 @@ class HostedConfig(BaseModel):
             )
         else:
             self.public_endpoint = validate_public_endpoint(self.public_endpoint, self.allow_insecure_endpoint)
+        if self.approval_mode not in APPROVAL_MODES:
+            raise ConfigError("WARDEN_APPROVAL_MODE must be set explicitly in hosted mode: 'independent' "
+                              "(recommended; needs WARDEN_APPROVER_ADDRESSES) or 'self' (requesters approve "
+                              "their own actions; demo only).")
+        if self.approval_mode == "independent" and not self.approvers:
+            raise ConfigError("WARDEN_APPROVAL_MODE=independent needs WARDEN_APPROVER_ADDRESSES (the approvers' "
+                              "agent addresses).")
+        if self.state_db is None:
+            raise ConfigError("WARDEN_STATE_DB is required in hosted mode (e.g. /app/state/warden.db on a "
+                              "persistent volume) so approvals survive restarts.")
