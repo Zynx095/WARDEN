@@ -49,6 +49,27 @@ def test_platform_port_is_honoured_and_validated(monkeypatch):
         HostedConfig()
 
 
+def test_request_body_cap_has_a_safe_default_and_bounds(monkeypatch):
+    monkeypatch.setenv("WARDEN_PUBLIC_ENDPOINT", "https://w.example.com/submit")
+    assert HostedConfig().max_request_bytes == 256 * 1024
+    for bad in ("0", "999999999", "lots"):
+        monkeypatch.setenv("WARDEN_MAX_REQUEST_BYTES", bad)
+        with pytest.raises(ConfigError):
+            HostedConfig()
+
+
+def test_hosted_agent_serves_no_sdk_inspector_routes(tmp_path, monkeypatch):
+    import asyncio
+    from uagents import asgi
+    from warden.hosting.server import HEALTH_ROUTE, build_hosted_agent
+    monkeypatch.setattr(asgi, "_read_asgi_body", asgi._read_asgi_body)
+    monkeypatch.setenv("WARDEN_HOSTED_ALLOW_INSECURE_ENDPOINT", "true")
+    cfg = HostedConfig(public_endpoint="http://127.0.0.1:8999/submit", port=8999, workspace_root=tmp_path / "h")
+    agent = build_hosted_agent(cfg, seed="hosting-config-test-seed-not-a-real-id", loop=asyncio.new_event_loop())
+    routes = {endpoint for (_, endpoint) in agent._rest_handlers}
+    assert routes == {HEALTH_ROUTE}
+
+
 def test_demo_workspace_is_created_with_fixtures_and_marker(tmp_path):
     root = prepare_demo_workspace(tmp_path / "demo")
     assert (root / MARKER).is_file()

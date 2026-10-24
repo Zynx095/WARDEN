@@ -15,5 +15,5 @@ def _hermetic_environment(monkeypatch: pytest.MonkeyPatch):
                  "WARDEN_MAX_PENDING_APPROVALS", "WARDEN_SECRET_KEY",
                  # hosted mode
                  "WARDEN_PUBLIC_ENDPOINT", "PORT", "WARDEN_HOSTED_ALLOW_INSECURE_ENDPOINT",
-                 "AGENTVERSE_API_KEY", "WARDEN_INTERACTIVE_CARDS"):
+                 "AGENTVERSE_API_KEY", "WARDEN_INTERACTIVE_CARDS", "WARDEN_MAX_REQUEST_BYTES"):
         monkeypatch.delenv(name, raising=False)

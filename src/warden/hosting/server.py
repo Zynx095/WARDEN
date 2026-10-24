@@ -17,7 +17,7 @@ from typing import Optional
 from uagents import Agent, Context, Model
 from uagents.resolver import Resolver
 
-from warden.agents.run_agent import build_warden_agent, restrict_bind_host
+from warden.agents.run_agent import build_warden_agent, limit_request_body, restrict_bind_host
 from warden.config import ConfigError, get_config, load_environment
 from warden.hosting.config import HostedConfig
 from warden.hosting.demo_workspace import DemoWorkspaceError, is_demo_workspace, prepare_demo_workspace
@@ -60,7 +60,12 @@ def build_hosted_agent(
         resolver=resolver,
         loop=loop,
         interactive_cards=cfg.interactive_cards,
+        # The SDK guards /connect and /disconnect by client IP, which a spoofed X-Forwarded-For
+        # header defeats behind its trust-all proxy setting; /connect signs with this identity.
+        enable_agent_inspector=False,
     )
+    if not limit_request_body(cfg.max_request_bytes):
+        raise ConfigError("Cannot cap request body size on this uAgents version; refusing to start.")
     scheme = cfg.public_endpoint.split(":", 1)[0]
     remote_auditor = get_config().remote_auditor
 
