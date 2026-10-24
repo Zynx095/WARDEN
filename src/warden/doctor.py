@@ -166,6 +166,22 @@ def check_filesystem() -> List[Check]:
             checks.append(Check(PASS, "Audit log directory writable", str(cfg.audit_log)))
         except OSError as exc:
             checks.append(Check(FAIL, "Audit log directory writable", type(exc).__name__))
+        if cfg.audit_log.is_file():
+            from warden.audit.events import verify_audit_chain
+            intact, count, reason = verify_audit_chain(cfg.audit_log)
+            checks.append(Check(PASS if intact else FAIL, "Audit log hash chain", f"{reason} ({count} records)",
+                                "" if intact else "Investigate the audit log; it was edited or truncated"))
+    if cfg.state_db is None:
+        checks.append(Check(WARN, "Approval state (WARDEN_STATE_DB)",
+                            "in memory: pending approvals and replay records are lost on restart",
+                            "Set WARDEN_STATE_DB for hosted or long-running use"))
+    else:
+        from warden.security.state_store import StateStore, StateStoreError
+        try:
+            StateStore(cfg.state_db).close()
+            checks.append(Check(PASS, "Approval state (WARDEN_STATE_DB)", f"durable: {cfg.state_db}"))
+        except StateStoreError as exc:
+            checks.append(Check(FAIL, "Approval state (WARDEN_STATE_DB)", str(exc), "Restore or move the database"))
     return checks
 
 
@@ -185,6 +201,20 @@ def check_port() -> List[Check]:
 def check_integration_readiness() -> List[Check]:
     """State configuration only. None of this proves connectivity or registration."""
     checks = [Check(PASS, "Mode", "local-only is fully usable with no external credentials")]
+    try:
+        cfg = WardenConfig()
+        approvers = [a for a in (os.getenv("WARDEN_APPROVER_ADDRESSES") or "").split(",") if a.strip()]
+        if cfg.approval_mode == "independent":
+            checks.append(Check(PASS if approvers else FAIL, "Approval mode", "independent (requesters cannot approve "
+                                f"their own actions); {len(approvers)} approver(s)",
+                                "" if approvers else "Set WARDEN_APPROVER_ADDRESSES"))
+        else:
+            checks.append(Check(WARN, "Approval mode", "self: a requester can approve their own actions",
+                                "Use WARDEN_APPROVAL_MODE=independent with WARDEN_APPROVER_ADDRESSES for shared use"))
+        checks.append(Check(PASS, "Risk Analyst", f"{cfg.risk_analyst} (advisory only)"
+                            + ("; assessment required for changes" if cfg.risk_required else "")))
+    except ConfigError as exc:
+        checks.append(Check(FAIL, "Approval and risk settings", str(exc)))
     try:
         mailbox = env_bool("WARDEN_USE_MAILBOX", False) or bool(os.getenv("AGENTVERSE_MAILBOX_KEY", "").strip())
     except ConfigError as exc:
