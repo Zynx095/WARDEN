@@ -16,17 +16,21 @@ COPY src ./src
 COPY docs/AGENTVERSE_README.md ./docs/AGENTVERSE_README.md
 # Editable install keeps the package rooted at /app, so repository-relative defaults resolve here.
 RUN pip install -e . \
- && mkdir -p /app/logs /app/hosted_workspace /app/run \
- && chown -R warden:warden /app/logs /app/hosted_workspace /app/run
+ && mkdir -p /app/logs /app/hosted_workspace /app/run /app/state \
+ && chown -R warden:warden /app/logs /app/hosted_workspace /app/run /app/state
 
 USER warden
 # uAgents writes its own state file in the working directory.
 WORKDIR /app/run
 
-# No secrets here. AGENT_SEED and WARDEN_PUBLIC_ENDPOINT are injected by the host at runtime.
+# No secrets here. AGENT_SEED, WARDEN_PUBLIC_ENDPOINT and WARDEN_APPROVAL_MODE (plus
+# WARDEN_APPROVER_ADDRESSES for independent approval) are injected by the host at runtime.
 ENV WARDEN_WORKSPACE_ROOT=/app/hosted_workspace \
-    WARDEN_AUDIT_LOG=/app/logs/audit.jsonl \
+    WARDEN_AUDIT_LOG=/app/state/audit.jsonl \
+    WARDEN_STATE_DB=/app/state/warden.db \
     PORT=8000
+# Approval state and the hash-chained audit log must survive restarts: mount a persistent volume here.
+VOLUME ["/app/state"]
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
