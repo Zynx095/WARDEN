@@ -40,6 +40,7 @@ class HealthResponse(Model):
     approval_mode: str
     durable_state: bool
     risk_analyst: str
+    interactive_cards: bool = False
 
 
 def build_hosted_agent(
@@ -88,6 +89,7 @@ def build_hosted_agent(
             approval_mode=core.approval_mode,
             durable_state=core.state_db is not None,
             risk_analyst=core.risk_analyst,
+            interactive_cards=cfg.interactive_cards,
         )
 
     return agent

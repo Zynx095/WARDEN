@@ -154,6 +154,7 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
     assert health["status"] == "ok" and health["workspace_ready"] is True
     assert health["agent_address"] == warden_id.address
     assert health["approval_mode"] == "self" and health["durable_state"] is True and health["risk_analyst"] == "local"
+    assert health["interactive_cards"] is True  # hosted default: text report plus ASI:One cards
     assert str(tmp_path) not in json.dumps(health)
 
     blocked_reply = ask("delete production.env")
