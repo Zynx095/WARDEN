@@ -18,6 +18,9 @@ Everything here is implemented and covered by tests in this repository unless ma
 | Advisory text (`reason`) cannot relax a block or skip approval | `security/policy.py` | `security/test_advisory_text_has_no_authority.py` |
 | Wire contract and fail-closed checker for a future out-of-process Auditor | `audit/attestation.py`, `docs/MULTI_AGENT_INTERFACE.md` | `unit/test_attestation.py` |
 | Opt-in remote Auditor (`WARDEN_REMOTE_AUDITOR`, off by default): VERIFIED needs local pass AND a valid signed attestation; timeout/forgery/replay/mismatch/unreachable give UNVERIFIED | `audit/remote.py`, `audit/request_builder.py`, `audit/transport.py`, `auditor/` | `integration/test_remote_auditor.py`, `integration/test_remote_auditor_live.py`, `auditor/` |
+| Authorized approvers bound into each pending record and enforced by the authorization manager for every channel; explicit REJECTED and EXPIRED outcomes; approval, rejection, expiry and post-approval failure audited | `security/authorization.py`, `agents/warden_agent.py` | `integration/test_decisions.py` |
+| Hosted entry point on a marked synthetic workspace (refuses real-data locations), https-only endpoint, health route without paths or secrets | `hosting/` | `hosting/` |
+| Interactive cards are presentation only; clicks go through the single decision path | `integrations/cards.py`, `integrations/acp_adapter.py` | `unit/test_cards.py`, `integration/test_interactive_cards.py`, `hosting/test_hosted_live.py` |
 
 ## Open (not addressed)
 
