@@ -82,6 +82,14 @@ def test_protected_file_rename_source_blocked(policy_engine: PolicyEngine):
     assert res.policy_id == "WDN-003"
 
 
+@pytest.mark.parametrize("target", ["production.env", ".env", "sub/secrets.json", "CREDENTIALS.JSON"])
+def test_protected_file_read_blocked(policy_engine: PolicyEngine, target: str):
+    # A read result is sent back to a remote chat peer, so reading a credential would leak it.
+    res = policy_engine.evaluate(Action(operation="READ", target=target))
+    assert res.decision == Decision.BLOCK
+    assert res.policy_id == "WDN-003"
+
+
 def test_rename_targeting_protected_destination_blocked(policy_engine: PolicyEngine):
     action = Action(operation="RENAME", target="harmless.txt", destination=".env")
     res = policy_engine.evaluate(action)

@@ -102,13 +102,20 @@ class PolicyEngine:
                     context=context,
                 )
 
-        # 5. Sensitive files cannot be modified, created, or deleted
+        # 5. Sensitive files cannot be modified, created, or deleted, nor read back to a chat peer
         if target_filename in self.protected_files:
             if operation in {"CREATE", "WRITE", "DELETE", "RENAME"}:
                 return PolicyResult(
                     decision=Decision.BLOCK,
                     policy_id="WDN-003",
                     reason="Protected resource modification is prohibited.",
+                    context=context,
+                )
+            if operation == ActionType.READ.value:
+                return PolicyResult(
+                    decision=Decision.BLOCK,
+                    policy_id="WDN-003",
+                    reason="Reading a protected resource is prohibited.",
                     context=context,
                 )
 
