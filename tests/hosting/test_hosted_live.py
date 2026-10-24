@@ -189,6 +189,8 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
                 return resp.status
         except urllib.error.HTTPError as err:
             return err.code
+        except (urllib.error.URLError, ConnectionError):
+            return "reset"  # the server answered and closed before the client finished sending
 
     spoof = {"x-forwarded-for": "127.0.0.1"}
     connect = json.dumps({"user_token": "x", "agent_type": "mailbox", "endpoint": "https://attacker.example/submit"})
@@ -196,7 +198,7 @@ def test_hosted_agent_serves_health_and_a_full_approval_round_trip(tmp_path, mon
     assert http("POST", "/disconnect", b"{}", spoof) == 404
     assert http("GET", "/messages", headers=spoof) == 404
     assert http("GET", "/agent_info") == 404
-    # Oversized bodies are refused before parsing.
-    assert http("POST", "/submit", b'{"pad":"' + b"x" * (cfg.max_request_bytes + 1) + b'"}') == 400
+    # Oversized bodies are refused before parsing; the client may see the 400 or a reset connection.
+    assert http("POST", "/submit", b'{"pad":"' + b"x" * (cfg.max_request_bytes + 1) + b'"}') in (400, "reset")
 
     assert offline == [], f"unexpected non-loopback HTTP attempts: {offline}"
