@@ -22,7 +22,7 @@ from uagents_core.contrib.protocols.chat import (
 )
 from warden.agents.intent_engine import IntentEngine
 from warden.agents.warden_agent import WardenAgent
-from warden.config import env_bool
+from warden.config import ConfigError, env_bool, get_config
 from warden.integrations.cards import (
     CardResponseError,
     CardValidationError,
@@ -37,6 +37,10 @@ from warden.models import Action, Decision, ExecutionStatus
 logger = logging.getLogger(__name__)
 
 MAX_MESSAGE_CHARS = 4000
+DUPLICATE_AFTER_RESTART = (
+    "[WARDEN] This message was already processed. Nothing was run again. "
+    "Send a new message to make a new request."
+)
 
 # "APPROVE|REJECT <action_id> <action digest>": the operator echoes the digest shown in the prompt.
 DECISION_PATTERN = re.compile(
@@ -63,6 +67,7 @@ class WardenACPHandler:
         intent_engine: Optional[IntentEngine] = None,
         approvers: Optional[Iterable[str]] = None,
         interactive_cards: Optional[bool] = None,
+        approval_mode: Optional[str] = None,
     ) -> None:
         self.warden = warden
         self.intent_engine = intent_engine or IntentEngine()
@@ -75,6 +80,11 @@ class WardenACPHandler:
         if approvers is None:
             approvers = [a for a in os.getenv("WARDEN_APPROVER_ADDRESSES", "").split(",")]
         self.approvers: Set[str] = {a.strip() for a in approvers if a and a.strip()}
+        # "self": requester or a configured approver decides. "independent": only a configured
+        # approver other than the requester may approve (the requester may still reject).
+        self.approval_mode = (approval_mode or get_config().approval_mode).strip().lower()
+        if self.approval_mode not in ("self", "independent"):
+            raise ConfigError("approval_mode must be 'self' or 'independent'.")
         # action_id -> sender that caused the approval request; only that sender may approve it.
         self._approval_owners: Dict[str, str] = {}
         # Bounded message deduplication cache: (sender, msg_id) -> (ack, reply).
@@ -120,6 +130,13 @@ class WardenACPHandler:
         if msg_id_key and msg_id_key in self._processed_messages:
             logger.info("Duplicate ACP message %s received from %s; returning cached response", msg_id_key[1], sender)
             return self._processed_messages[msg_id_key]
+        store = getattr(self.warden, "state_store", None)
+        if msg_id_key and store is not None and store.get_reply(*msg_id_key) is not None:
+            # Processed before a restart. The original reply is not kept on disk (it may hold read
+            # output), so the sender gets a notice and nothing runs again.
+            logger.info("Duplicate ACP message %s from %s was processed before a restart", msg_id_key[1], sender)
+            ack = ChatAcknowledgement(timestamp=msg.timestamp, acknowledged_msg_id=msg.msg_id)
+            return ack, ChatMessage(content=[TextContent(type="text", text=store.get_reply(*msg_id_key))])
 
         try:
             ack, reply = self._process_chat_message(msg, sender)
@@ -135,6 +152,8 @@ class WardenACPHandler:
             if len(self._processed_messages) >= 1000:
                 self._processed_messages.pop(next(iter(self._processed_messages)))
             self._processed_messages[msg_id_key] = (ack, reply)
+            if store is not None:
+                store.put_reply(*msg_id_key, DUPLICATE_AFTER_RESTART)
 
         return ack, reply
 
@@ -219,11 +238,14 @@ class WardenACPHandler:
         # 5. Evaluate and execute proposed actions through WARDEN's pipeline
         results: List[Dict[str, Any]] = []
         self._prune_approval_owners()
+        independent = self.approval_mode == "independent"
         for action in proposed_actions:
             # Bind who may decide into the pending record itself, so every decision channel is held to it.
             res = self.warden.handle_action_request(
-                action, authorized_approvers={sender} | self.approvers,
+                action,
+                authorized_approvers=set(self.approvers) if independent else {sender} | self.approvers,
                 request_text=user_text, batch_size=len(proposed_actions),
+                requester=sender, independent_approval=independent,
             )
             if res.get("status") == ExecutionStatus.AWAITING_APPROVAL:
                 self._approval_owners[res.get("pending_id", action.action_id)] = sender

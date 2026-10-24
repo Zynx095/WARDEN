@@ -36,6 +36,7 @@ from warden.security.digest import (
 )
 from warden.security.path_validation import PathValidator
 from warden.security.policy import PolicyEngine
+from warden.security.state_store import StateStore
 from warden.risk.analyst import LocalRiskAnalyst, build_risk_request
 
 
@@ -76,7 +77,9 @@ class WardenAgent:
         self.workspace = workspace or Workspace(self.config.workspace_root)
         self.path_validator = PathValidator(self.workspace.root_path)
         self.policy_engine = PolicyEngine(self.workspace.root_path)
-        self.auth_manager = AuthorizationManager(self.config.secret_key)
+        # Durable approval state when WARDEN_STATE_DB is set; an unusable store refuses startup.
+        self.state_store = StateStore(self.config.state_db) if self.config.state_db else None
+        self.auth_manager = AuthorizationManager(self.config.secret_key, store=self.state_store)
         self.executor = RestrictedExecutor(
             self.workspace,
             auth_manager=self.auth_manager,
@@ -166,13 +169,16 @@ class WardenAgent:
         authorized_approvers: Optional[Iterable[str]] = None,
         request_text: Optional[str] = None,
         batch_size: int = 1,
+        requester: Optional[str] = None,
+        independent_approval: bool = False,
     ) -> Dict[str, Any]:
         """Process an action request through the complete verification pipeline.
 
         ``authorized_approvers``, when given, is bound into a resulting approval request: only
         those identities can later approve or reject it, whatever channel the decision uses.
         ``request_text`` and ``batch_size`` (the instruction and how many actions it produced)
-        are context for the advisory Risk Analyst only.
+        are context for the advisory Risk Analyst only. ``requester`` is bound into an approval
+        request; with ``independent_approval`` the requester can never approve it.
         """
         correlation_id = action.correlation_id or action.action_id
 
@@ -195,6 +201,16 @@ class WardenAgent:
 
         # Step 2: Deterministic Policy Evaluation (the risk assessment is not an input)
         policy_result: PolicyResult = self.policy_engine.evaluate(action)
+        if (self.config.risk_required and policy_result.decision == Decision.ALLOW
+                and action.operation.upper() != ActionType.READ.value
+                and (risk is None or risk.get("status") != "ASSESSED")):
+            # Deterministic rule on missing evidence: without a valid assessment a change needs a human.
+            policy_result = PolicyResult(
+                decision=Decision.REQUIRE_APPROVAL,
+                policy_id="WDN-006",
+                reason="A required risk assessment was unavailable; this change needs approval.",
+                context=policy_result.context,
+            )
 
         # Handle BLOCKED decisions
         if policy_result.decision == Decision.BLOCK:
@@ -237,6 +253,8 @@ class WardenAgent:
                     state_digest=binding.state_digest,
                     authorized_approvers=authorized_approvers,
                     risk=risk,
+                    requester=requester,
+                    independent=independent_approval,
                 )
             except PendingQueueFull as exc:
                 return {**self._refuse(action, correlation_id, str(exc)), **extra}
@@ -426,6 +444,15 @@ class WardenAgent:
         if binding is None:
             return self._refuse(action, correlation_id, "Target path invalid upon approval.")
 
+        # Policy is evaluated again: a request that policy now blocks is cancelled, never executed.
+        current = self.policy_engine.evaluate(action)
+        if current.decision == Decision.BLOCK:
+            self.auth_manager.invalidate_pending(action_id, by=approver_id)
+            return {**self._refuse(action, correlation_id,
+                                   f"Policy now blocks this action ({current.policy_id}: {current.reason}); "
+                                   "the request was cancelled."),
+                    "policy_id": current.policy_id, **self._describe(action, binding), **self._risk_of(pending)}
+
         try:
             auth_token = self.auth_manager.approve_pending_action(
                 action_id=action_id,
@@ -446,10 +473,11 @@ class WardenAgent:
                 target=action.target,
                 destination=action.destination,
                 decision=Decision.ALLOW,
-                policy_id="WDN-004-APPROVED",
+                policy_id=auth_token.policy_id,
                 execution_status=ExecutionStatus.AUTHORIZED,
                 metadata={"approved_by": approver_id, "action_digest": binding.action_digest,
-                          "token_id": auth_token.token_id},
+                          "token_id": auth_token.token_id, "requester": pending.requester,
+                          "independent_approval": pending.independent},
             )
         )
 
@@ -470,6 +498,7 @@ class WardenAgent:
                     metadata={"approved_by": approver_id, "action_digest": binding.action_digest},
                 )
             )
+            self.auth_manager.record_outcome(action_id, ExecutionStatus.FAILED.value)
             return {
                 "action_id": action_id,
                 "correlation_id": correlation_id,
@@ -483,6 +512,7 @@ class WardenAgent:
 
         verification = self.auditor.verify_outcome(action, exec_result, pre_state)
         final_status = self._final_status(verification)
+        self.auth_manager.record_outcome(action_id, final_status.value)
 
         self.audit_logger.record(
             AuditEvent(

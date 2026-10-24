@@ -102,6 +102,7 @@ def env_int(name: str, default: int, minimum: int, maximum: int) -> int:
 
 AGENT_ADDRESS_PATTERN = re.compile(r"^agent1[a-z0-9]{50,70}$")
 RISK_ANALYST_MODES = {"local", "remote", "off"}
+APPROVAL_MODES = {"self", "independent"}
 
 
 def _auditor_address() -> Optional[str]:
@@ -142,6 +143,19 @@ def _peer_endpoint(name: str) -> Optional[str]:
     if parsed.scheme == "http" and parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
         raise ConfigError(f"{name} may use plain http only on loopback.")
     return raw.rstrip("/")
+
+
+def _approval_mode() -> str:
+    raw = (os.getenv("WARDEN_APPROVAL_MODE") or "self").strip().lower()
+    if raw not in APPROVAL_MODES:
+        raise ConfigError(f"WARDEN_APPROVAL_MODE must be one of {sorted(APPROVAL_MODES)}.")
+    return raw
+
+
+def _state_db() -> Optional[Path]:
+    """Durable approval/delivery state. Unset or empty keeps it in memory (lost on restart)."""
+    raw = (os.getenv("WARDEN_STATE_DB") or "").strip()
+    return resolve_repo_path(raw) if raw else None
 
 
 def _log_level() -> str:
@@ -207,6 +221,13 @@ class WardenConfig(BaseModel):
         default_factory=lambda: env_int("WARDEN_AUDITOR_TIMEOUT_SECONDS", 10, 1, 120)
     )
     auditor_endpoint: Optional[str] = Field(default_factory=lambda: _peer_endpoint("WARDEN_AUDITOR_ENDPOINT"))
+    # "self": the requester (or a configured approver) may approve. "independent": only a configured
+    # approver other than the requester may approve; the requester can still reject.
+    approval_mode: str = Field(default_factory=_approval_mode)
+    state_db: Optional[Path] = Field(default_factory=_state_db)
+    # When true, a mutating action that policy would ALLOW needs approval if no valid risk
+    # assessment was obtained (WDN-006). The assessment itself never decides anything.
+    risk_required: bool = Field(default_factory=lambda: env_bool("WARDEN_RISK_REQUIRED", False))
     # Risk Analyst (advisory only). "local" runs it in-process; "remote" asks a separate uAgent.
     risk_analyst: str = Field(default_factory=_risk_analyst_mode)
     risk_analyst_address: Optional[str] = Field(default_factory=_risk_analyst_address)
