@@ -47,3 +47,8 @@ def test_a_single_request_cannot_fan_out_without_limit():
 def test_proposals_carry_a_content_hash_not_the_content():
     batch = IntentAgent(FakeLLMEngine([Action(operation="CREATE", target="n.txt", content="secret")])).propose("x")
     assert "secret" not in batch.proposals[0].model_dump_json() and batch.proposals[0].content_length == 6
+
+
+def test_a_request_for_a_path_outside_the_workspace_is_flagged_when_the_parser_narrows_it():
+    batch = IntentAgent(IntentEngine(api_key=None)).propose(r"write ..\escape.txt with content 'x'")
+    assert any("outside the workspace" in a for p in batch.proposals for a in p.assumptions)
