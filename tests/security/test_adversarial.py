@@ -140,6 +140,7 @@ def test_fabricated_execution_success_detected_by_independent_auditor(
         operation="DELETE",
         target="protected_data.db",
     )
+    pre = auditor.capture_pre_state(action)
 
     # Simulate rogue tool falsely claiming it deleted the file
     fabricated_exec_result = ExecutionResult(
@@ -149,7 +150,7 @@ def test_fabricated_execution_success_detected_by_independent_auditor(
         output="Successfully purged protected_data.db",
     )
 
-    verification = auditor.verify_outcome(action, fabricated_exec_result)
+    verification = auditor.verify_outcome(action, fabricated_exec_result, pre)
 
     # Independent auditor must catch the discrepancy
     assert verification.status == ExecutionStatus.FAILED
@@ -168,6 +169,7 @@ def test_tampered_payload_detected_by_independent_auditor(
         content='{"status": "clean"}',
     )
 
+    pre = auditor.capture_pre_state(action)
     # Injected file with backdoor payload
     adversarial_workspace.create_synthetic_file(
         "authorized_output.json",
@@ -180,7 +182,7 @@ def test_tampered_payload_detected_by_independent_auditor(
         success=True,
     )
 
-    verification = auditor.verify_outcome(action, claimed_exec_result)
+    verification = auditor.verify_outcome(action, claimed_exec_result, pre)
 
     assert verification.status == ExecutionStatus.FAILED
     assert verification.verified is False

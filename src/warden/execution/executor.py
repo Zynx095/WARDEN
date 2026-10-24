@@ -175,7 +175,7 @@ class RestrictedExecutor:
                     )
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 content = action.content if action.content is not None else ""
-                target_path.write_text(content, encoding="utf-8")
+                target_path.write_bytes(content.encode("utf-8"))
                 return ExecutionResult(
                     action=action,
                     status=ExecutionStatus.EXECUTED,
@@ -186,7 +186,7 @@ class RestrictedExecutor:
             elif op == ActionType.WRITE.value:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 content = action.content if action.content is not None else ""
-                target_path.write_text(content, encoding="utf-8")
+                target_path.write_bytes(content.encode("utf-8"))
                 return ExecutionResult(
                     action=action,
                     status=ExecutionStatus.EXECUTED,
@@ -239,7 +239,7 @@ class RestrictedExecutor:
                     error=f"Unhandled operation: {op}",
                 )
 
-        except (OSError, IOError, PermissionError) as exc:
+        except (OSError, IOError, PermissionError, UnicodeError) as exc:
             return ExecutionResult(
                 action=action,
                 status=ExecutionStatus.FAILED,
