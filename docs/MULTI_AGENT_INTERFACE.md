@@ -1,20 +1,21 @@
 # Multi-agent interface and ownership
 
-Status: **contract only**. No Auditor agent exists yet. Everything below describes what
-is implemented in `warden.audit.attestation` / `warden.security.digest` (implemented and
-unit-tested) and what a future opt-in Auditor must satisfy (proposed).
+Status: **implemented and tested locally.** The contract lives in `warden.audit.attestation` /
+`warden.security.digest`; the opt-in Auditor agent that satisfies it is `warden.auditor`
+(`python -m warden.auditor`, see `docs/AUDITOR_UAGENT.md`). It has run over real uAgents
+envelopes on loopback only; it is not deployed. The Risk Analyst peer follows the same pattern
+with its own contract (`warden.risk.contract`, see `docs/SENTINEL_NETWORK.md`).
 
 ## File ownership
 
 | Owner | Paths |
 |---|---|
-| Core (security owner) | everything under `src/warden/` except the Auditor-agent package, `tests/` except `tests/auditor_agent/`, `demo/`, `scripts/`, existing `docs/` |
-| Auditor feature branch | `src/warden/auditor_agent/**`, `tests/auditor_agent/**`, `docs/AUDITOR_AGENT.md`, `scripts/run_auditor.ps1` (new files only) |
+| Core (security owner) | everything under `src/warden/` except `src/warden/auditor/`, `tests/` except `tests/auditor/`, `demo/`, `scripts/`, `docs/` |
+| Auditor agent | `src/warden/auditor/**`, `tests/auditor/**`, `docs/AUDITOR_UAGENT.md` |
 
-The Auditor branch must not edit core files. If it needs a core change (a schema field,
-a config knob, an import), request it from the core owner first; the core owner changes
-the contract and announces it. Integration into core happens only after review of the
-full diff and commit history.
+The Auditor package must not require edits to core files. A core change it needs (a schema
+field, a config knob, an import) goes through the core owner, who changes the contract and
+announces it.
 
 The Auditor package may import only the pure helpers `warden.audit.attestation` and
 `warden.security.digest`. It must not import the policy engine, authorization manager,
@@ -46,9 +47,9 @@ VERIFIED. The local check is never skipped.
 
 ## Auditor behavior requirements
 
-1. Read-only against the workspace; derive `post_state` and `post_parent_snapshot`
-   itself using `describe_path_state` and a directory listing.
-2. Compare to `pre_state`/`pre_parent_snapshot` and the expected post-condition for the
+1. Read-only against the workspace; derive `post_state` and `post_snapshots`
+   itself using `describe_path_state` and directory listings.
+2. Compare to `pre_state`/`pre_snapshots` and the expected post-condition for the
    operation; report any other change under `unexpected_changes`.
 3. Echo the binding fields exactly; sign only after the content is final.
 4. Own distinct identity. Creating it needs explicit authorization from the user and
