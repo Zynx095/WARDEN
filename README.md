@@ -22,6 +22,17 @@ User (ASI:One chat) → Intent Agent → Risk Analyst → Policy Guard → appro
 Outcomes are reported as `VERIFIED`, `UNVERIFIED`, `FAILED`, `BLOCKED`, `AWAITING_APPROVAL`,
 `REJECTED` or `EXPIRED`, with a per-stage workflow trace.
 
+## Fetch-A-Thon 3.0 Submission Deliverables
+
+| Deliverable | Location / Status | Description |
+|---|---|---|
+| **Problem & Architecture** | [Problem & Architecture](#problem--architecture) | Deterministic policy containment, exact-action cryptographic binding, and independent outcome auditing for AI file operations |
+| **Public GitHub Repository** | `https://github.com/<username>/WARDEN` (pending publication) | Clean, Apache-2.0 open-source candidate with 650+ automated tests |
+| **Agentverse Public Agent** | Registered as `warden-verification-agent` (pending live registration) | Hosted agent with ACP v0.3.0 and Interactive Cards v1 |
+| **ASI:One Interaction Transcript** | `https://asi1.ai/...` (captured after live deployment) | End-to-end conversation showing harmless read, card approval, and blocked target |
+| **Demo Walkthrough Video** | `https://...` (pending final link) | 12-scenario security demonstration and ASI:One interactive review card workflow |
+
+
 ## Status (2026-10-24, branch `integration/sentinel-final`)
 
 | | |
