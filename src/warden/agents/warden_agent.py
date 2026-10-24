@@ -154,6 +154,7 @@ class WardenAgent:
                 "reason": policy_result.reason,
                 "executed": False,
                 "verified": False,
+                **self._describe(action, None),
             }
 
         # Handle REQUIRE_APPROVAL decisions
@@ -295,6 +296,7 @@ class WardenAgent:
             "output": exec_result.output,
             "verification_details": verification.details,
             "observed_state": verification.observed_state,
+            **self._describe(action, binding),
         }
 
     @staticmethod
